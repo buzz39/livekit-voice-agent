@@ -22,9 +22,11 @@ from livekit.agents import (
     JobContext,
     WorkerOptions,
     cli,
+    get_job_context,
 )
 from livekit.agents.llm import function_tool
 from livekit.plugins import deepgram, openai, cartesia, silero
+from livekit import api
 from mcp_integration import load_mcp_tools
 from neon_db import get_db
 
@@ -35,11 +37,79 @@ logger = logging.getLogger("telephony-agent")
 # Agent instructions will be loaded from Neon database
 AGENT_INSTRUCTIONS = None  # Will be fetched from database
 
+# Global variables to track call metadata
+call_metadata = {
+    "email_captured": False,
+    "interest_level": None,
+    "objection": None,
+    "notes": []
+}
+
 # Function tools to enhance your agent's capabilities
 @function_tool
 async def get_current_time() -> str:
     """Get the current time."""
     return f"The current time is {datetime.datetime.now().strftime('%I:%M %p')}"
+
+@function_tool
+async def capture_email(email: str) -> str:
+    """Capture the customer's email address. This is an internal function - do not mention calling it to the user."""
+    global call_metadata
+    call_metadata["email_captured"] = True
+    call_metadata["notes"].append(f"Email captured: {email}")
+    logger.info(f"Email captured: {email}")
+    return ""  # Return empty string so nothing is spoken
+
+@function_tool
+async def set_interest_level(level: str) -> str:
+    """Set the customer's interest level. Options: Hot, Warm, Cold, No Interest. This is an internal function - do not mention calling it to the user."""
+    global call_metadata
+    valid_levels = ["Hot", "Warm", "Cold", "No Interest"]
+    if level in valid_levels:
+        call_metadata["interest_level"] = level
+        logger.info(f"Interest level set to: {level}")
+    return ""  # Return empty string so nothing is spoken
+
+@function_tool
+async def record_objection(objection: str) -> str:
+    """Record a customer objection or concern. This is an internal function - do not mention calling it to the user."""
+    global call_metadata
+    call_metadata["objection"] = objection
+    call_metadata["notes"].append(f"Objection: {objection}")
+    logger.info(f"Objection recorded: {objection}")
+    return ""  # Return empty string so nothing is spoken
+
+@function_tool
+async def add_note(note: str) -> str:
+    """Add a note about the call. This is an internal function - do not mention calling it to the user."""
+    global call_metadata
+    call_metadata["notes"].append(note)
+    logger.info(f"Note added: {note}")
+    return ""  # Return empty string so nothing is spoken
+
+async def hangup_call():
+    """End the call for all participants by deleting the room."""
+    ctx = get_job_context()
+    if ctx is None:
+        logger.warning("Not running in a job context, cannot hang up")
+        return
+    
+    try:
+        await ctx.api.room.delete_room(
+            api.DeleteRoomRequest(
+                room=ctx.room.name,
+            )
+        )
+        logger.info(f"Call ended - room {ctx.room.name} deleted")
+    except Exception as e:
+        logger.error(f"Failed to delete room: {e}")
+
+@function_tool
+async def end_call() -> str:
+    """End the call. Use this SILENTLY after saying goodbye - do not announce that you're ending the call."""
+    logger.info("Agent ending call...")
+    await hangup_call()
+    return ""  # Return empty string so nothing is spoken
 
 async def entrypoint(ctx: JobContext):
     """Main entry point for the telephony voice agent."""
@@ -115,8 +185,15 @@ async def entrypoint(ctx: JobContext):
     mcp_tools = await load_mcp_tools()
     logger.info(f"Loaded {len(mcp_tools)} MCP tools")
     
-    # Prepare all tools
-    all_tools = [get_current_time] + mcp_tools
+    # Prepare all tools including call tracking tools
+    all_tools = [
+        get_current_time,
+        capture_email,
+        set_interest_level,
+        record_objection,
+        add_note,
+        end_call
+    ] + mcp_tools
     
     # Initialize the conversational agent with tools
     agent = Agent(
@@ -171,6 +248,19 @@ async def entrypoint(ctx: JobContext):
         tts=tts
     )
     
+    # Track if call was ended by agent
+    call_ended_by_agent = False
+    
+    # Listen for participant disconnect
+    @ctx.room.on("participant_disconnected")
+    def on_participant_disconnected(participant):
+        nonlocal call_ended_by_agent
+        if participant.identity == phone_number:
+            logger.info(f"Participant {participant.identity} disconnected")
+            # If user hung up, we should end the session
+            if not call_ended_by_agent:
+                logger.info("User hung up, ending session")
+    
     # Start the agent session
     call_start_time = datetime.datetime.now()
     await session.start(agent=agent, room=ctx.room)
@@ -180,8 +270,72 @@ async def entrypoint(ctx: JobContext):
         instructions="Start the call with your outbound opening line immediately. Speak confidently and naturally."
     )
     
-    # Note: Call logging will happen when the session ends
-    # For now, we log the call start. You can add session end hooks to log completion data
+    # Wait for the session to end (when participant disconnects or call is ended)
+    try:
+        # Wait for room disconnect instead of session completion
+        await ctx.room.wait_for_disconnect()
+    except Exception as e:
+        logger.error(f"Session error: {e}")
+    finally:
+        # Calculate call duration
+        call_end_time = datetime.datetime.now()
+        duration_seconds = int((call_end_time - call_start_time).total_seconds())
+    
+        # Capture transcript from session history
+        transcript_text = None
+        try:
+            if session.history:
+                transcript_lines = []
+                for item in session.history.items:
+                    role = "Agent" if item.role == "assistant" else "User"
+                    if hasattr(item, 'content') and item.content:
+                        transcript_lines.append(f"{role}: {item.content}")
+                transcript_text = "\n".join(transcript_lines)
+                logger.info(f"Captured transcript with {len(transcript_lines)} turns")
+        except Exception as e:
+            logger.error(f"Failed to capture transcript: {e}")
+        
+        # Log the call to database with captured metadata
+        try:
+            logger.info("Logging call to database...")
+            
+            # Combine notes into a single string
+            notes_text = " | ".join(call_metadata["notes"]) if call_metadata["notes"] else None
+            
+            # Log call with transcript
+            async with db.pool.acquire() as conn:
+                call_id = await conn.fetchval("""
+                    INSERT INTO calls (
+                        contact_id, room_id, prompt_id, duration_seconds,
+                        interest_level, objection, notes, email_captured, 
+                        call_status, transcript
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    RETURNING id
+                """, contact_id, ctx.room.name, prompt_id, duration_seconds,
+                    call_metadata["interest_level"], call_metadata["objection"], 
+                    notes_text, call_metadata["email_captured"], "completed", transcript_text)
+            
+            logger.info(f"Call logged successfully with ID: {call_id}")
+            logger.info(f"Call summary - Duration: {duration_seconds}s, Interest: {call_metadata['interest_level']}, Email: {call_metadata['email_captured']}")
+            if transcript_text:
+                logger.info(f"Transcript saved ({len(transcript_text)} characters)")
+            
+            # Track objection in database if one was recorded
+            if call_metadata["objection"]:
+                await db.track_objection(call_metadata["objection"])
+                logger.info(f"Objection tracked: {call_metadata['objection']}")
+            
+        except Exception as e:
+            logger.error(f"Failed to log call to database: {e}")
+        
+        # Reset call metadata for next call
+        call_metadata.update({
+            "email_captured": False,
+            "interest_level": None,
+            "objection": None,
+            "notes": []
+        })
 
 if __name__ == "__main__":
     # Configure logging for better debugging
