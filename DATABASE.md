@@ -53,6 +53,23 @@ Your LiveKit telephony agent now uses Neon PostgreSQL to store prompts, contacts
    - `frequency` - How often it occurs
    - `created_at`, `updated_at` - Timestamps
 
+6. **ai_configs** - AI provider configurations
+   - `id` - Primary key
+   - `name` - Unique config name (e.g., "default_telephony_config")
+   - `llm_provider` - LLM provider (openai, etc.)
+   - `llm_model` - Model name (gpt-4o-mini, etc.)
+   - `llm_temperature` - Temperature setting (0.0-1.0)
+   - `stt_provider` - Speech-to-text provider (deepgram, etc.)
+   - `stt_model` - STT model name (nova-3, etc.)
+   - `stt_language` - Language code (en-US, etc.)
+   - `tts_provider` - Text-to-speech provider (cartesia, etc.)
+   - `tts_model` - TTS model name (sonic-2, etc.)
+   - `tts_voice` - Voice ID
+   - `tts_language` - Language code (en, etc.)
+   - `tts_speed` - Speech speed (0.5-2.0)
+   - `is_active` - Boolean
+   - `created_at`, `updated_at` - Timestamps
+
 ## How It Works
 
 ### 1. Agent Fetches Prompt on Startup
@@ -78,6 +95,47 @@ await db.log_call(
     room_id=ctx.room.name,
     duration_seconds=call_duration
 )
+```
+
+## Setting Up the Database
+
+### Create the AI Config Table
+Run the SQL script to create the new table:
+```bash
+psql $NEON_DATABASE_URL -f create_ai_config_table.sql
+```
+
+Or run directly in Neon Console:
+```sql
+-- See create_ai_config_table.sql for full schema
+```
+
+## Updating AI Configuration
+
+### Change LLM Model
+```sql
+UPDATE ai_configs 
+SET llm_model = 'gpt-4o',
+    llm_temperature = 0.8,
+    updated_at = NOW()
+WHERE name = 'default_telephony_config';
+```
+
+### Change TTS Voice
+```sql
+UPDATE ai_configs 
+SET tts_voice = 'new-voice-id-here',
+    tts_speed = 1.1,
+    updated_at = NOW()
+WHERE name = 'default_telephony_config';
+```
+
+### Change STT Language
+```sql
+UPDATE ai_configs 
+SET stt_language = 'es-US',
+    updated_at = NOW()
+WHERE name = 'default_telephony_config';
 ```
 
 ## Updating Agent Instructions

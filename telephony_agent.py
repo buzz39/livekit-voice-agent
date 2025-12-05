@@ -86,6 +86,30 @@ async def entrypoint(ctx: JobContext):
     # Get prompt ID for logging
     prompt_id = await db.get_prompt_id("default_roofing_agent")
     
+    # Fetch AI configuration from database
+    logger.info("Fetching AI configuration from Neon database...")
+    ai_config = await db.get_ai_config("default_telephony_config")
+    
+    if not ai_config:
+        logger.warning("No AI config found in database, using defaults")
+        ai_config = {
+            "llm_provider": "openai",
+            "llm_model": "gpt-4o-mini",
+            "llm_temperature": 0.7,
+            "stt_provider": "deepgram",
+            "stt_model": "nova-3",
+            "stt_language": "en-US",
+            "tts_provider": "cartesia",
+            "tts_model": "sonic-2",
+            "tts_voice": "a0e99841-438c-4a64-b679-ae501e7d6091",
+            "tts_language": "en",
+            "tts_speed": 1.0
+        }
+    
+    logger.info(f"Using LLM: {ai_config['llm_provider']}/{ai_config['llm_model']}")
+    logger.info(f"Using STT: {ai_config['stt_provider']}/{ai_config['stt_model']}")
+    logger.info(f"Using TTS: {ai_config['tts_provider']}/{ai_config['tts_model']}")
+    
     # Load MCP tools from n8n server
     logger.info("Loading MCP tools...")
     mcp_tools = await load_mcp_tools()
@@ -100,37 +124,51 @@ async def entrypoint(ctx: JobContext):
         tools=all_tools
     )
     
-    # Configure the voice processing pipeline optimized for telephony
-    session = AgentSession(
-        # Voice Activity Detection
-        vad=silero.VAD.load(),
-        
-        # Speech-to-Text - Deepgram Nova-3
-        stt=deepgram.STT(
-            model="nova-3",
-            language="en-US",
+    # Configure LLM based on database config
+    if ai_config["llm_provider"] == "openai":
+        llm = openai.LLM(
+            model=ai_config["llm_model"],
+            temperature=float(ai_config["llm_temperature"])
+        )
+    else:
+        logger.warning(f"Unsupported LLM provider: {ai_config['llm_provider']}, using OpenAI")
+        llm = openai.LLM(model="gpt-4o-mini", temperature=0.7)
+    
+    # Configure STT based on database config
+    if ai_config["stt_provider"] == "deepgram":
+        stt = deepgram.STT(
+            model=ai_config["stt_model"],
+            language=ai_config["stt_language"],
             interim_results=True,
             punctuate=True,
             smart_format=True,
             filler_words=True,
             endpointing_ms=25,
             sample_rate=16000
-        ),
-        
-        # Large Language Model - GPT-4o-mini
-        llm=openai.LLM(
-            model="gpt-4o-mini",
-            temperature=0.7
-        ),
-        
-        # Text-to-Speech - Cartesia Sonic-2
-        tts=cartesia.TTS(
-            model="sonic-2",
-            voice="a0e99841-438c-4a64-b679-ae501e7d6091",  # Professional female voice
-            language="en",
-            speed=1.0,
+        )
+    else:
+        logger.warning(f"Unsupported STT provider: {ai_config['stt_provider']}, using Deepgram")
+        stt = deepgram.STT(model="nova-3", language="en-US")
+    
+    # Configure TTS based on database config
+    if ai_config["tts_provider"] == "cartesia":
+        tts = cartesia.TTS(
+            model=ai_config["tts_model"],
+            voice=ai_config["tts_voice"],
+            language=ai_config["tts_language"],
+            speed=float(ai_config["tts_speed"]),
             sample_rate=24000
         )
+    else:
+        logger.warning(f"Unsupported TTS provider: {ai_config['tts_provider']}, using Cartesia")
+        tts = cartesia.TTS(model="sonic-2", voice="a0e99841-438c-4a64-b679-ae501e7d6091")
+    
+    # Configure the voice processing pipeline optimized for telephony
+    session = AgentSession(
+        vad=silero.VAD.load(),
+        stt=stt,
+        llm=llm,
+        tts=tts
     )
     
     # Start the agent session

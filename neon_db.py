@@ -136,6 +136,19 @@ class NeonDB:
                 WHERE created_at > NOW() - INTERVAL '$1 days'
             """, days)
             return dict(stats) if stats else {}
+    
+    async def get_ai_config(self, name: str = "default_telephony_config") -> Optional[Dict[str, Any]]:
+        """Fetch AI configuration (LLM, TTS, STT) by name."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT 
+                    llm_provider, llm_model, llm_temperature,
+                    stt_provider, stt_model, stt_language,
+                    tts_provider, tts_model, tts_voice, tts_language, tts_speed
+                FROM ai_configs 
+                WHERE name = $1 AND is_active = true
+            """, name)
+            return dict(row) if row else None
 
 
 # Global instance
