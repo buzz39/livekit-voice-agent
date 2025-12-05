@@ -14,6 +14,7 @@ License: MIT
 
 import datetime
 import logging
+from pathlib import Path
 from dotenv import load_dotenv
 from livekit.agents import (
     Agent,
@@ -30,6 +31,11 @@ from mcp_integration import load_mcp_tools
 load_dotenv()
 logger = logging.getLogger("telephony-agent")
 
+# Load agent instructions from file
+INSTRUCTIONS_FILE = Path(__file__).parent / "agent_instructions.txt"
+with open(INSTRUCTIONS_FILE, "r", encoding="utf-8") as f:
+    AGENT_INSTRUCTIONS = f.read()
+
 # Function tools to enhance your agent's capabilities
 @function_tool
 async def get_current_time() -> str:
@@ -45,6 +51,20 @@ async def entrypoint(ctx: JobContext):
     participant = await ctx.wait_for_participant()
     logger.info(f"Phone call connected from participant: {participant.identity}")
     
+    # Extract business_name from room metadata
+    import json
+    business_name = "Hindustan Roofing"  # Default fallback
+    first_name = "Scott"
+    email = "thakurg39@gmail.com"
+
+    if ctx.room.metadata:
+        try:
+            metadata = json.loads(ctx.room.metadata)
+            business_name = metadata.get("business_name", "there")
+            logger.info(f"Business name from metadata: {business_name}")
+        except json.JSONDecodeError:
+            logger.warning("Could not parse room metadata")
+    
     # Load MCP tools from n8n server
     logger.info("Loading MCP tools...")
     mcp_tools = await load_mcp_tools()
@@ -55,22 +75,7 @@ async def entrypoint(ctx: JobContext):
     
     # Initialize the conversational agent with tools
     agent = Agent(
-        instructions="""You are a friendly and helpful AI assistant answering phone calls. 
-        
-        Your personality:
-        - Professional yet warm and approachable
-        - Speak clearly and at a moderate pace for phone calls
-        - Keep responses concise but complete
-        - Ask clarifying questions when needed
-        
-        Your capabilities:
-        - Answer questions on a wide range of topics
-        - Tell the current time
-        - Use various tools available from the n8n automation platform
-        - Have natural conversations
-        
-        Always identify yourself as an AI assistant when asked.
-        Keep responses conversational and under 30 seconds for phone clarity.""",
+        instructions=AGENT_INSTRUCTIONS,
         tools=all_tools
     )
     
@@ -110,18 +115,9 @@ async def entrypoint(ctx: JobContext):
     # Start the agent session
     await session.start(agent=agent, room=ctx.room)
     
-    # Generate personalized greeting based on time of day
-    hour = datetime.datetime.now().hour
-    if hour < 12:
-        time_greeting = "Good morning"
-    elif hour < 18:
-        time_greeting = "Good afternoon"
-    else:
-        time_greeting = "Good evening"
-    
+    # Trigger outbound opener immediately
     await session.generate_reply(
-        instructions=f"""Say '{time_greeting}! Thank you for calling. What's happening?'
-        Speak warmly and professionally at a moderate pace."""
+        instructions="Start the call with your outbound opening line immediately. Speak confidently and naturally."
     )
 
 if __name__ == "__main__":

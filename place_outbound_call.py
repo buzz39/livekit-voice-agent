@@ -1,17 +1,19 @@
 from dotenv import load_dotenv
 import os
 import asyncio
+import json
 from pathlib import Path
 
 from livekit import api
 from livekit.protocol.sip import CreateSIPParticipantRequest
+from livekit.protocol.room import CreateRoomRequest
 
 env_path = Path(__file__).resolve().parent / ".env"
 load_dotenv(env_path.as_posix(), override=True)
 
 ROOM_NAME = "outbound-call-room"
 
-async def place_call():
+async def place_call(business_name: str = "ABC Roofing", phone_number: str = "+919096132265"):
     lk_url = os.getenv("LIVEKIT_URL")
     lk_key = os.getenv("LIVEKIT_API_KEY")
     lk_secret = os.getenv("LIVEKIT_API_SECRET")
@@ -28,9 +30,27 @@ async def place_call():
         api_key=lk_key,
         api_secret=lk_secret,
     ) as lk:
+        # Create room with metadata containing business_name
+        room_metadata = json.dumps({
+            "business_name": business_name,
+            "phone_number": phone_number
+        })
+        
+        try:
+            await lk.room.create_room(
+                CreateRoomRequest(
+                    name=ROOM_NAME,
+                    metadata=room_metadata
+                )
+            )
+            print(f"✓ Room created with business name: {business_name}")
+        except Exception as e:
+            # Room might already exist, update metadata
+            print(f"Room exists, updating metadata: {e}")
+        
         request = CreateSIPParticipantRequest(
             sip_trunk_id="ST_WBf7rtea4MQt",
-            sip_call_to="+919096132265",
+            sip_call_to=phone_number,
             sip_number="+12029787305",
             room_name=ROOM_NAME,
             participant_identity="outbound-caller",
@@ -40,7 +60,8 @@ async def place_call():
         )
 
         try:
-            print(f"\nInitiating call to +919096132265...")
+            print(f"\nInitiating call to {phone_number}...")
+            print(f"Business: {business_name}")
             print(f"From number: +12029787305")
             print(f"Room: {ROOM_NAME}")
 
@@ -55,4 +76,8 @@ async def place_call():
             raise
 
 if __name__ == "__main__":
-    asyncio.run(place_call())
+    # Example: Change these values for each call
+    asyncio.run(place_call(
+        business_name="ABC Roofing",
+        phone_number="+919096132265"
+    ))
