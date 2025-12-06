@@ -14,6 +14,8 @@ License: MIT
 
 import datetime
 import logging
+import json
+import os
 from pathlib import Path
 from dotenv import load_dotenv
 from livekit.agents import (
@@ -30,6 +32,14 @@ from livekit import api
 from mcp_integration import load_mcp_tools
 from neon_db import get_db
 
+# Whispey Observability Integration
+try:
+    from whispey import LivekitObserve
+    WHISPEY_ENABLED = True
+except ImportError:
+    WHISPEY_ENABLED = False
+    logger.warning("Whispey not installed. Install with: pip install whispey")
+
 
 load_dotenv()
 logger = logging.getLogger("telephony-agent")
@@ -37,55 +47,6 @@ logger = logging.getLogger("telephony-agent")
 # Agent instructions will be loaded from Neon database
 AGENT_INSTRUCTIONS = None  # Will be fetched from database
 
-# Global variables to track call metadata
-call_metadata = {
-    "email_captured": False,
-    "interest_level": None,
-    "objection": None,
-    "notes": []
-}
-
-# Function tools to enhance your agent's capabilities
-@function_tool
-async def get_current_time() -> str:
-    """Get the current time."""
-    return f"The current time is {datetime.datetime.now().strftime('%I:%M %p')}"
-
-@function_tool
-async def capture_email(email: str) -> str:
-    """Capture the customer's email address. This is an internal function - do not mention calling it to the user."""
-    global call_metadata
-    call_metadata["email_captured"] = True
-    call_metadata["notes"].append(f"Email captured: {email}")
-    logger.info(f"Email captured: {email}")
-    return ""  # Return empty string so nothing is spoken
-
-@function_tool
-async def set_interest_level(level: str) -> str:
-    """Set the customer's interest level. Options: Hot, Warm, Cold, No Interest. This is an internal function - do not mention calling it to the user."""
-    global call_metadata
-    valid_levels = ["Hot", "Warm", "Cold", "No Interest"]
-    if level in valid_levels:
-        call_metadata["interest_level"] = level
-        logger.info(f"Interest level set to: {level}")
-    return ""  # Return empty string so nothing is spoken
-
-@function_tool
-async def record_objection(objection: str) -> str:
-    """Record a customer objection or concern. This is an internal function - do not mention calling it to the user."""
-    global call_metadata
-    call_metadata["objection"] = objection
-    call_metadata["notes"].append(f"Objection: {objection}")
-    logger.info(f"Objection recorded: {objection}")
-    return ""  # Return empty string so nothing is spoken
-
-@function_tool
-async def add_note(note: str) -> str:
-    """Add a note about the call. This is an internal function - do not mention calling it to the user."""
-    global call_metadata
-    call_metadata["notes"].append(note)
-    logger.info(f"Note added: {note}")
-    return ""  # Return empty string so nothing is spoken
 
 async def hangup_call():
     """End the call for all participants by deleting the room."""
@@ -104,17 +65,72 @@ async def hangup_call():
     except Exception as e:
         logger.error(f"Failed to delete room: {e}")
 
-@function_tool
-async def end_call() -> str:
-    """End the call. Use this SILENTLY after saying goodbye - do not announce that you're ending the call."""
-    logger.info("Agent ending call...")
-    await hangup_call()
-    return ""  # Return empty string so nothing is spoken
+
+from webhook_dispatcher import WebhookDispatcher
 
 async def entrypoint(ctx: JobContext):
     """Main entry point for the telephony voice agent."""
     
+    # Initialize per-call state
+    call_metadata = {
+        "notes": []
+    }
+
+    # Define function tools within the closure to access call_metadata securely
+    @function_tool
+    async def get_current_time() -> str:
+        """Get the current time."""
+        return f"The current time is {datetime.datetime.now().strftime('%I:%M %p')}"
+
+    @function_tool
+    async def update_call_data(field: str, value: str) -> str:
+        """
+        Record a piece of data collected from the user.
+        Args:
+            field: The name of the field to update (e.g., 'email', 'interest_level', 'roof_age').
+            value: The value to record.
+        """
+        call_metadata[field] = value
+        logger.info(f"Captured data: {field} = {value}")
+        
+        # Fire data.captured webhook
+        if 'dispatcher' in locals() and dispatcher:
+            await dispatcher.dispatch("data.captured", {
+                "field": field,
+                "value": value
+            })
+            
+        return ""
+
+    @function_tool
+    async def add_note(note: str) -> str:
+        """Add a general note about the call that doesn't fit into a specific field."""
+        call_metadata["notes"].append(note)
+        logger.info(f"Note added: {note}")
+        return ""
+
+    @function_tool
+    async def end_call() -> str:
+        """End the call. Use this SILENTLY after saying goodbye - do not announce that you're ending the call."""
+        logger.info("Agent ending call...")
+        await hangup_call()
+        return ""
+
     await ctx.connect()
+    
+    # Initialize Whispey observability if enabled
+    whispey = None
+    if WHISPEY_ENABLED:
+        whispey_api_key = os.getenv("WHISPEY_API_KEY")
+        whispey_agent_id = os.getenv("WHISPEY_AGENT_ID", "inbound-agent")
+        if whispey_api_key:
+            try:
+                whispey = LivekitObserve(agent_id=whispey_agent_id, apikey=whispey_api_key)
+                logger.info(f"Whispey observability enabled for agent: {whispey_agent_id}")
+            except Exception as e:
+                logger.error(f"Failed to initialize Whispey: {e}")
+        else:
+            logger.warning("WHISPEY_API_KEY not set, observability disabled")
     
     # Wait for participant (caller) to join
     participant = await ctx.wait_for_participant()
@@ -123,29 +139,89 @@ async def entrypoint(ctx: JobContext):
     # Connect to Neon database
     db = await get_db()
     
-    # Fetch agent instructions from database
-    logger.info("Fetching agent instructions from Neon database...")
-    agent_instructions = await db.get_active_prompt("default_roofing_agent")
-    if not agent_instructions:
-        logger.error("No active prompt found in database, using fallback")
-        agent_instructions = "You are Sam, a professional caller for Sambhav Tech AI."
+    # Agent instructions will be fetched after determining the agent_slug
+
     
     # Extract metadata from room
-    import json
     business_name = "there"  # Default fallback
     phone_number = participant.identity
-    contact_name = None
-    email = None
+    agent_slug = "default_roofing_agent" # Default agent slug
 
     if ctx.room.metadata:
         try:
             metadata = json.loads(ctx.room.metadata)
             business_name = metadata.get("business_name", "there")
             phone_number = metadata.get("phone_number", participant.identity)
-            logger.info(f"Business name from metadata: {business_name}")
+            # Extract agent slug from metadata if present
+            if "agent_id" in metadata:
+                agent_slug = metadata["agent_id"]
+            elif "slug" in metadata:
+                agent_slug = metadata["slug"]
+                
+            logger.info(f"Business name: {business_name}, Agent Slug: {agent_slug}")
         except json.JSONDecodeError:
             logger.warning("Could not parse room metadata")
+            
+    # Fetch agent configuration (greeting, MCP URL) - EARLY CHECK
+    logger.info(f"Fetching configuration for agent: {agent_slug}")
+    agent_config = await db.get_agent_config(agent_slug)
     
+    # If explicit agent slug failed (not active or not found), try default
+    if not agent_config and agent_slug != "default_roofing_agent":
+        logger.warning(f"Agent {agent_slug} not found or inactive, falling back to default")
+        agent_slug = "default_roofing_agent"
+        agent_config = await db.get_agent_config(agent_slug)
+
+    # If still no config (even default is broken/inactive), use hardcoded fallback or exit
+    if not agent_config:
+        logger.error(f"CRITICAL: Active configuration for {agent_slug} not found. Using bare defaults.")
+        agent_config = {}
+    
+    # Fetch schema fields and Webhooks using the RESOLVED slug
+    logger.info(f"Fetching data schema and webhooks for {agent_slug}...")
+    schema_fields = await db.get_data_schema(agent_slug)
+    webhooks = await db.get_webhooks(agent_slug)
+    
+    # Initialize Webhook Dispatcher
+    dispatcher = WebhookDispatcher(webhooks, agent_slug)
+    
+    # Fire call.started event
+    await dispatcher.dispatch("call.started", {
+        "phone_number": phone_number,
+        "business_name": business_name,
+        "room_name": ctx.room.name,
+        "agent_slug": agent_slug
+    })
+
+    # Fetch agent instructions from database
+    logger.info(f"Fetching agent instructions for {agent_slug}...")
+    # Update get_active_prompt to take the slug (it was defaulting implicitly before)
+    # Warning: neon_db.get_active_prompt signature might need check if it takes slug param correctly
+    # Checking neon_db.py content from previous views... yes, it takes `name`.
+    agent_instructions = await db.get_active_prompt(agent_slug) 
+    if not agent_instructions:
+        logger.error("No active prompt found in database, using fallback")
+        agent_instructions = "You are a professional caller."
+    
+    # Inject schema into instructions
+    if schema_fields:
+        schema_prompt = "\n\nYou are authorized to collect the following information:\n"
+        for field in schema_fields:
+            field_name = field['field_name']
+            desc = field.get('description', 'No description found')
+            rules = field.get('validation_rules')
+            
+            schema_prompt += f"- {field_name}: {desc}"
+            if rules:
+                schema_prompt += f" (Allowed values: {rules})"
+            schema_prompt += "\n"
+            
+        schema_prompt += "\nUse the `update_call_data` tool to save these values."
+        
+        # Append to existing instructions
+        agent_instructions += schema_prompt
+        logger.info(f"Injected {len(schema_fields)} fields into prompt")
+
     # Create or update contact in database
     contact_id = await db.upsert_contact(
         phone_number=phone_number,
@@ -153,10 +229,14 @@ async def entrypoint(ctx: JobContext):
     )
     logger.info(f"Contact ID: {contact_id}")
     
-    # Get prompt ID for logging
-    prompt_id = await db.get_prompt_id("default_roofing_agent")
+    # Get prompt ID for logging implementation
+    # Note: get_prompt_id likely needs the slug too if it's agent specific, 
+    # but based on previous code it seemed to take a name.
+    prompt_id = await db.get_prompt_id(agent_slug)
     
     # Fetch AI configuration from database
+    # This remains shared for now unless we want per-agent AI configs (e.g. different voices)
+    # For now, keeping it global or we could fetch it FROM agent_config later if we linked them.
     logger.info("Fetching AI configuration from Neon database...")
     ai_config = await db.get_ai_config("default_telephony_config")
     
@@ -182,15 +262,14 @@ async def entrypoint(ctx: JobContext):
     
     # Load MCP tools from n8n server
     logger.info("Loading MCP tools...")
-    mcp_tools = await load_mcp_tools()
+    # Use dynamic URL if present, otherwise fallback to env
+    mcp_tools = await load_mcp_tools(mcp_url=agent_config.get("mcp_endpoint_url"))
     logger.info(f"Loaded {len(mcp_tools)} MCP tools")
     
     # Prepare all tools including call tracking tools
     all_tools = [
         get_current_time,
-        capture_email,
-        set_interest_level,
-        record_objection,
+        update_call_data,
         add_note,
         end_call
     ] + mcp_tools
@@ -234,19 +313,38 @@ async def entrypoint(ctx: JobContext):
             voice=ai_config["tts_voice"],
             language=ai_config["tts_language"],
             speed=float(ai_config["tts_speed"]),
-            sample_rate=24000
+            sample_rate=16000  # Changed from 24000 to 16000 for telephony compatibility
+        )
+    elif ai_config["tts_provider"] == "openai":
+        tts = openai.TTS(
+            model=ai_config.get("tts_model", "tts-1"),  # tts-1 or tts-1-hd
+            voice=ai_config.get("tts_voice", "alloy"),  # alloy, echo, fable, onyx, nova, shimmer
         )
     else:
-        logger.warning(f"Unsupported TTS provider: {ai_config['tts_provider']}, using Cartesia")
-        tts = cartesia.TTS(model="sonic-2", voice="a0e99841-438c-4a64-b679-ae501e7d6091")
+        logger.warning(f"Unsupported TTS provider: {ai_config['tts_provider']}, using OpenAI TTS")
+        tts = openai.TTS(model="tts-1", voice="alloy")
     
     # Configure the voice processing pipeline optimized for telephony
+    # Use VAD settings from DB if available
     session = AgentSession(
         vad=silero.VAD.load(),
         stt=stt,
         llm=llm,
         tts=tts
     )
+    
+    # Start Whispey session tracking with metadata
+    session_id = None
+    if whispey:
+        try:
+            session_id = whispey.start_session(
+                session=session,
+                phone_number=phone_number,
+                business_name=business_name
+            )
+            logger.info(f"Whispey session started: {session_id}")
+        except Exception as e:
+            logger.error(f"Failed to start Whispey session: {e}")
     
     # Track if call was ended by agent
     call_ended_by_agent = False
@@ -261,13 +359,24 @@ async def entrypoint(ctx: JobContext):
             if not call_ended_by_agent:
                 logger.info("User hung up, ending session")
     
+    # Register Whispey shutdown callback
+    if whispey and session_id:
+        async def whispey_shutdown():
+            try:
+                await whispey.export(session_id)
+                logger.info(f"Whispey data exported for session: {session_id}")
+            except Exception as e:
+                logger.error(f"Failed to export Whispey data: {e}")
+        ctx.add_shutdown_callback(whispey_shutdown)
+    
     # Start the agent session
     call_start_time = datetime.datetime.now()
     await session.start(agent=agent, room=ctx.room)
     
     # Trigger outbound opener immediately
+    opening_line = agent_config.get("opening_line") or "Start the call with your outbound opening line immediately. Speak confidently and naturally."
     await session.generate_reply(
-        instructions="Start the call with your outbound opening line immediately. Speak confidently and naturally."
+        instructions=opening_line
     )
     
     # Wait for the session to end (when participant disconnects or call is ended)
@@ -281,6 +390,30 @@ async def entrypoint(ctx: JobContext):
         call_end_time = datetime.datetime.now()
         duration_seconds = int((call_end_time - call_start_time).total_seconds())
     
+        # Fire call.ended event
+        if 'dispatcher' in locals() and dispatcher:
+            # Capture transcript from session history
+            transcript_text = None
+            try:
+                if session.history:
+                    transcript_lines = []
+                    for item in session.history.items:
+                        role = "Agent" if item.role == "assistant" else "User"
+                        if hasattr(item, 'content') and item.content:
+                            transcript_lines.append(f"{role}: {item.content}")
+                    transcript_text = "\n".join(transcript_lines)
+            except Exception as e:
+                logger.error(f"Failed to capture transcript for webhook: {e}")
+
+            await dispatcher.dispatch("call.ended", {
+                "duration_seconds": duration_seconds,
+                "call_status": "completed",
+                "disconnect_reason": "unknown", # livekit doesn't strictly provide this yet in simple API
+                "transcript": transcript_text,
+                "captured_data": call_metadata,
+                "notes": call_metadata.get("notes", [])
+            })
+
         # Capture transcript from session history
         transcript_text = None
         try:
@@ -302,40 +435,39 @@ async def entrypoint(ctx: JobContext):
             # Combine notes into a single string
             notes_text = " | ".join(call_metadata["notes"]) if call_metadata["notes"] else None
             
-            # Log call with transcript
-            async with db.pool.acquire() as conn:
-                call_id = await conn.fetchval("""
-                    INSERT INTO calls (
-                        contact_id, room_id, prompt_id, duration_seconds,
-                        interest_level, objection, notes, email_captured, 
-                        call_status, transcript
-                    )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                    RETURNING id
-                """, contact_id, ctx.room.name, prompt_id, duration_seconds,
-                    call_metadata["interest_level"], call_metadata["objection"], 
-                    notes_text, call_metadata["email_captured"], "completed", transcript_text)
+            # Extract standard fields for legacy columns if they exist in captured data
+            legacy_email = call_metadata.get("email")
+            legacy_interest = call_metadata.get("interest_level")
+            legacy_objection = call_metadata.get("objection")
             
-            logger.info(f"Call logged successfully with ID: {call_id}")
-            logger.info(f"Call summary - Duration: {duration_seconds}s, Interest: {call_metadata['interest_level']}, Email: {call_metadata['email_captured']}")
+            # Log call with transcript and JSON data
+            await db.log_call(
+                contact_id=contact_id,
+                room_id=ctx.room.name,
+                prompt_id=prompt_id,
+                duration_seconds=duration_seconds,
+                interest_level=legacy_interest,
+                objection=legacy_objection,
+                notes=notes_text,
+                email_captured=bool(legacy_email),
+                call_status="completed",
+                transcript=transcript_text,
+                captured_data=call_metadata
+            )
+            
+            logger.info(f"Call logged successfully")
             if transcript_text:
-                logger.info(f"Transcript saved ({len(transcript_text)} characters)")
+                logger.info(f"Transcript saved")
             
             # Track objection in database if one was recorded
-            if call_metadata["objection"]:
-                await db.track_objection(call_metadata["objection"])
-                logger.info(f"Objection tracked: {call_metadata['objection']}")
+            if legacy_objection:
+                await db.track_objection(legacy_objection)
+                logger.info(f"Objection tracked: {legacy_objection}")
             
         except Exception as e:
             logger.error(f"Failed to log call to database: {e}")
         
-        # Reset call metadata for next call
-        call_metadata.update({
-            "email_captured": False,
-            "interest_level": None,
-            "objection": None,
-            "notes": []
-        })
+        # Metadata is local now, no need to reset global state
 
 if __name__ == "__main__":
     # Configure logging for better debugging
@@ -347,5 +479,5 @@ if __name__ == "__main__":
     # Run the agent with the name that matches your dispatch rule
     cli.run_app(WorkerOptions(
         entrypoint_fnc=entrypoint,
-        agent_name="telephony_agent"  # This must match your dispatch rule
+        agent_name="inbound_agent"  # Updated for separate dispatch rule
     ))

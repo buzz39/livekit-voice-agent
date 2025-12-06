@@ -242,9 +242,15 @@ async def load_mcp_tools(mcp_url: str = None) -> List[Callable]:
     url = mcp_url or os.getenv("N8N_MCP_URL")
     
     if not url:
-        logger.warning("No MCP URL configured (set N8N_MCP_URL), skipping MCP tools")
+        logger.warning("No MCP URL configured (set N8N_MCP_URL or config), skipping MCP tools")
         return []
     
+    # Check if we need to reconnect (different URL)
+    if _mcp_integration is not None and _mcp_integration.mcp_url != url:
+        logger.info(f"MCP URL changed from {_mcp_integration.mcp_url} to {url}, reconnecting...")
+        await _mcp_integration.close()
+        _mcp_integration = None
+
     # Create or reuse the integration instance
     if _mcp_integration is None:
         _mcp_integration = MCPToolsIntegration(url)

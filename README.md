@@ -1,189 +1,277 @@
-# LiveKit AI Telephony Agent with n8n MCP Integration
+# LiveKit Voice Agent Platform
 
-A production-ready AI voice agent for phone calls, powered by LiveKit and integrated with n8n workflows via Model Context Protocol (MCP).
+A production-ready AI voice agent platform for inbound and outbound phone calls, powered by LiveKit with Neon PostgreSQL configuration and Whispey observability.
 
 ## Features
 
-- 🎙️ **Voice AI Agent** - Natural phone conversations with GPT-4o-mini
-- 📞 **Telephony Ready** - Optimized for phone call quality and latency
-- 🔧 **n8n Integration** - Execute n8n workflows during calls via MCP
+- 🎙️ **Dual Agents** - Separate inbound/outbound call handling
+- 📞 **Telephony Ready** - SIP integration for phone calls  
+- 🗄️ **Database-Driven** - Dynamic agent configuration via Neon PostgreSQL
+- 📊 **Observability** - Integrated with Whispey for call analytics and transcripts
+- 🔧 **n8n Integration** - Execute workflows via Model Context Protocol (MCP)
 - 🎯 **Function Tools** - Extensible tool system for custom capabilities
-- 🚀 **Production Ready** - Docker support, proper error handling, logging
-
-## Tech Stack
-
-- **LiveKit** - Real-time voice infrastructure
-- **OpenAI GPT-4o-mini** - Language model
-- **Deepgram Nova-3** - Speech-to-text
-- **Cartesia Sonic-2** - Text-to-speech
-- **Silero VAD** - Voice activity detection
-- **n8n MCP** - Workflow automation integration
+- 🚀 **Production Ready** - Cloud deployment ready, proper error handling
 
 ## Quick Start
 
-### Prerequisites
-
-- Python 3.12+
-- LiveKit Cloud account or self-hosted instance
-- n8n instance with MCP endpoint
-- API keys for OpenAI, Deepgram, Cartesia
-
-### Installation
-
-1. Clone the repository
-2. Install dependencies:
-   ```bash
-   uv sync
-   ```
-
-3. Copy `.env.example` to `.env` and configure:
-   ```bash
-   cp .env.example .env
-   ```
-
-4. Edit `.env` with your credentials
-
-### Running the Agent
+### 1. Install Dependencies
 
 ```bash
-python telephony_agent.py
+# Using uv (recommended)
+uv sync
+
+# Or using pip
+pip install -e .
 ```
 
-The agent will:
-1. Connect to LiveKit
-2. Load n8n MCP tools
-3. Wait for incoming calls
-4. Handle conversations with AI + n8n workflows
-
-## Configuration
-
-### Environment Variables
-
-```env
-# LiveKit Configuration
-LIVEKIT_URL=wss://your-instance.livekit.cloud
-LIVEKIT_API_KEY=your-api-key
-LIVEKIT_API_SECRET=your-api-secret
-
-# AI Service Keys
-OPENAI_API_KEY=sk-...
-DEEPGRAM_API_KEY=...
-CARTESIA_API_KEY=sk_car_...
-
-# n8n MCP Integration
-N8N_MCP_URL=https://your-n8n.com/mcp/your-endpoint-id
-```
-
-### Agent Configuration
-
-Edit `telephony_agent.py` to customize:
-- Agent instructions and personality
-- Voice settings (speed, voice ID)
-- STT/TTS models
-- Custom function tools
-
-## n8n MCP Integration
-
-The agent automatically loads tools from your n8n MCP endpoint. When a caller requests something that matches an n8n workflow, the agent will:
-
-1. Recognize the intent
-2. Call the appropriate n8n tool
-3. Execute the workflow
-4. Return results to the caller
-
-### Example Use Cases
-
-- "Create a calendar event for tomorrow at 2pm"
-- "Send an email to the team"
-- "Check the status of order #12345"
-- "Add this to my CRM"
-
-## Docker Deployment
-
-Build and run with Docker:
+### 2. Configure Environment
 
 ```bash
-docker build -t telephony-agent .
-docker run --env-file .env telephony-agent
+cp .env.example .env
+# Edit .env with your credentials
+```
+
+### 3. Setup Whispey Observability
+
+See [WHISPEY_SETUP.md](WHISPEY_SETUP.md) for detailed instructions.
+
+```bash
+uv pip install whispey
+# Add WHISPEY_API_KEY and WHISPEY_AGENT_ID to .env
+```
+
+### 4. Run the Agents
+
+```bash
+# Inbound agent (terminal 1)
+python inbound_agent.py dev
+
+# Outbound agent (terminal 2)  
+python outbound_agent.py dev
+
+# API server (terminal 3)
+python server.py
 ```
 
 ## Project Structure
 
 ```
 .
-├── telephony_agent.py      # Main agent application
-├── mcp_integration.py      # n8n MCP client
-├── place_outbound_call.py  # Utility for testing outbound calls
-├── pyproject.toml          # Python dependencies
-├── Dockerfile              # Container configuration
-├── livekit.toml           # LiveKit agent config
-└── .env                    # Environment variables (not in git)
+├── inbound_agent.py          # Handles incoming calls
+├── outbound_agent.py         # Makes outbound calls
+├── server.py                 # FastAPI server for triggering calls
+├── neon_db.py               # Database integration layer
+├── mcp_integration.py       # n8n MCP client
+├── webhook_dispatcher.py    # Webhook event dispatcher
+├── pyproject.toml           # Python dependencies
+├── .env.example             # Environment template
+├── WHISPEY_SETUP.md        # Observability setup guide
+└── INTEGRATION_COMPLETE.md # Implementation summary
 ```
 
-## Making Outbound Calls
+## Architecture
 
-Use the included utility script:
+```
+┌─────────────────┐
+│   n8n/Excel     │  
+│   (Triggers)    │
+└────────┬────────┘
+         │
+         v
+┌─────────────────┐     ┌──────────────┐
+│  server.py API  │────>│ LiveKit Room │
+└─────────────────┘     └──────┬───────┘
+                               │
+                    ┌──────────┴──────────┐
+                    │                     │
+         ┌──────────v──────┐   ┌─────────v────────┐
+         │ inbound_agent   │   │ outbound_agent   │
+         │     .py         │   │      .py         │
+         └────────┬────────┘   └────────┬─────────┘
+                  │                     │
+                  └──────────┬──────────┘
+                             │
+                    ┌────────v─────────┐
+                    │  Whispey SDK     │
+                    │  (Observability) │
+                    └────────┬─────────┘
+                             │
+                ┌────────────┴────────────┐
+                │                         │
+         ┌──────v──────┐         ┌───────v────────┐
+         │ Neon DB     │         │ Whispey Cloud  │
+         │ (Config)    │         │ (Analytics)    │
+         └─────────────┘         └────────────────┘
+```
+
+## Configuration
+
+### Environment Variables
+
+```env
+# LiveKit
+LIVEKIT_URL=wss://your-instance.livekit.cloud
+LIVEKIT_API_KEY=your-api-key
+LIVEKIT_API_SECRET=your-api-secret
+
+# AI Services
+OPENAI_API_KEY=sk-...
+DEEPGRAM_API_KEY=...
+CARTESIA_API_KEY=sk_car_...
+
+# Database
+NEON_DATABASE_URL=postgresql://...
+
+# Observability
+WHISPEY_API_KEY=wsp_...
+WHISPEY_AGENT_ID=your-agent-id
+
+# Optional: n8n Integration
+N8N_MCP_URL=https://your-n8n.com/mcp/endpoint
+
+# Optional: SIP Configuration  
+SIP_TRUNK_ID=ST_...
+SIP_FROM_NUMBER=+1...
+```
+
+### Agent Configuration
+
+Agents are configured dynamically via the Neon database:
+- **Prompts** - Agent instructions and personality
+- **AI Models** - LLM, STT, TTS provider settings
+- **Data Schema** - Fields to collect during calls
+- **Webhooks** - Event notifications to external systems
+
+Update configurations in the database to change agent behavior without redeploying code.
+
+## Database Schema
+
+Key tables in Neon PostgreSQL:
+
+- `prompts` - Agent instructions (by agent slug)
+- `ai_configs` - AI provider configurations
+- `agent_configs` - Agent-specific settings (greeting, MCP URL)
+- `data_schemas` - Custom fields to collect per agent
+- `webhook_configs` - Event webhook endpoints
+- `contacts` - Customer/lead database
+- `calls` - Call logs with transcripts and metadata
+
+Run `db_schema_update.sql` to create/update tables.
+
+## Usage Examples
+
+### Triggering Outbound Calls via n8n
+
+Use the `n8n_outbound_flow.json` workflow:
+
+1. Import workflow into n8n
+2. Configure Google Sheets with leads (Phone, Business Name)
+3. Set schedule trigger
+4. Update HTTP Request node with your server URL
+5. Activate workflow
+
+n8n will:
+- Read leads from Excel/Google Sheets
+- Call `server.py` API for each lead
+- `outbound_agent.py` makes the call
+- Results logged to Neon DB and Whispey
+
+### API Endpoint for Outbound Calls
 
 ```bash
-python place_outbound_call.py
+curl -X POST http://localhost:8000/outbound-call \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phone_number": "+15551234567",
+    "business_name": "Acme Corp",
+    "agent_slug": "sales_agent"
+  }'
 ```
 
-Edit the script to configure:
-- Destination phone number
-- Source number (from your SIP trunk)
-- Room name
+## Deployment
 
-## Customization
+### Deploy to LiveKit Cloud
 
-### Adding Custom Tools
+```bash
+# Install LiveKit CLI
+brew install livekit
 
-Add function tools in `telephony_agent.py`:
-
-```python
-@function_tool
-async def my_custom_tool(param: str) -> str:
-    """Tool description for the LLM."""
-    # Your logic here
-    return "result"
-
-# Register the tool
-agent.register_tool(my_custom_tool)
+# Deploy agents
+lk deploy create --name inbound-agent inbound_agent.py
+lk deploy create --name outbound-agent outbound_agent.py
 ```
 
-### Changing Voice Settings
+### Deploy API Server
 
-Modify the TTS configuration:
+Deploy `server.py` to:
+- Railway: `railway up`
+- Render: Connect GitHub repo
+- Docker: Use provided `Dockerfile`
 
-```python
-tts=cartesia.TTS(
-    model="sonic-2",
-    voice="your-voice-id",  # Browse voices at cartesia.ai
-    speed=1.0,              # 0.5 to 2.0
-    sample_rate=24000
-)
-```
+## Documentation
+
+- **[WHISPEY_SETUP.md](WHISPEY_SETUP.md)** - Observability integration guide
+- **[INTEGRATION_COMPLETE.md](INTEGRATION_COMPLETE.md)** - What's been implemented
+- **[n8n_outbound_flow.json](n8n_outbound_flow.json)** - Example n8n workflow
+
+## Tech Stack
+
+| Component | Technology |
+|-----------|-----------|
+| Agents | Python 3.12 + LiveKit Agents SDK |
+| LLM | OpenAI GPT-4o-mini |
+| STT | Deepgram Nova-3 |
+| TTS | Cartesia Sonic-2 |
+| VAD | Silero |
+| Database | Neon PostgreSQL |
+| Observability | Whispey |
+| Automation | n8n (MCP integration) |
+| API Server | FastAPI + Uvicorn |
+| Telephony | LiveKit SIP |
+
+## Best Practices Implemented
+
+✅ Separate inbound/outbound agents  
+✅ Using `AgentSession` (not deprecated `VoicePipelineAgent`)  
+✅ Function tools for call metadata capture  
+✅ Database-driven configuration  
+✅ Proper error handling and logging  
+✅ Webhook system for extensibility  
+✅ No global state (per-call closures)  
+✅ Graceful degradation (Whispey optional)  
+
+## Cost Estimate
+
+For ~100 calls/month (personal use):
+- **LiveKit Cloud**: ~$10-20/month
+- **Neon Database**: Free tier
+- **Whispey**: Check pricing (likely free tier)
+- **n8n**: Self-hosted free or $20/month cloud
+- **Total**: ~$10-40/month
 
 ## Troubleshooting
 
-### Agent not connecting
-- Check LiveKit credentials
-- Verify network connectivity
-- Check logs for error messages
+### Agents not starting
+- Check `.env` file has all required variables
+- Run `uv sync` to install dependencies
+- Verify LiveKit credentials are correct
 
-### n8n tools not loading
-- Verify N8N_MCP_URL is correct
-- Test n8n endpoint accessibility
-- Check n8n MCP configuration
+### No data in Whispey
+- Check `WHISPEY_API_KEY` is set
+- Look for "Whispey observability enabled" in logs
+- Make a test call and wait 1-2 minutes
 
-### Poor call quality
-- Check network latency
-- Verify sample rates match
-- Review VAD sensitivity settings
+### Database connection errors
+- Verify `NEON_DATABASE_URL` is correct
+- Check database tables exist (run `db_schema_update.sql`)
+- Ensure Neon project is not paused
+
+## Support
+
+- **LiveKit Docs**: https://docs.livekit.io/agents
+- **Whispey**: https://github.com/PYPE-AI-MAIN/whispey
+- **Neon**: https://neon.tech/docs
 
 ## License
 
 MIT
-
-## Support
-
-For issues and questions, please open a GitHub issue.

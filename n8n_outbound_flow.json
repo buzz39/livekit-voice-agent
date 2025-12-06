@@ -1,0 +1,167 @@
+{
+    "name": "Outbound Call & Status System",
+    "nodes": [
+        {
+            "parameters": {
+                "path": "call-status-webhook",
+                "responseMode": "lastNode",
+                "options": {}
+            },
+            "id": "webhook-trigger",
+            "name": "Webhook (Status Update)",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 2,
+            "position": [
+                20,
+                340
+            ],
+            "webhookId": "call-status-webhook"
+        },
+        {
+            "parameters": {
+                "authentication": "oAuth2",
+                "documentId": {
+                    "__rl": true,
+                    "value": "YOUR_SHEET_ID_HERE",
+                    "mode": "id"
+                },
+                "sheetName": {
+                    "__rl": true,
+                    "value": "Leads",
+                    "mode": "name"
+                },
+                "options": {}
+            },
+            "id": "read-sheets",
+            "name": "Google Sheets (Read)",
+            "type": "n8n-nodes-base.googleSheets",
+            "typeVersion": 4.5,
+            "position": [
+                220,
+                140
+            ]
+        },
+        {
+            "parameters": {
+                "triggerTimes": {
+                    "item": [
+                        {
+                            "mode": "everyDay",
+                            "hour": 9
+                        }
+                    ]
+                }
+            },
+            "id": "schedule-trigger",
+            "name": "Schedule Trigger",
+            "type": "n8n-nodes-base.schedule",
+            "typeVersion": 1.2,
+            "position": [
+                20,
+                140
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "http://your-server-ip:8000/outbound-call",
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "phone_number",
+                            "value": "={{ $json.Phone }}"
+                        },
+                        {
+                            "name": "business_name",
+                            "value": "={{ $json['Business Name'] }}"
+                        },
+                        {
+                            "name": "agent_slug",
+                            "value": "roofing-specialist"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "trigger-call",
+            "name": "Trigger Outbound Call",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                460,
+                140
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "update",
+                "documentId": {
+                    "__rl": true,
+                    "value": "YOUR_SHEET_ID_HERE",
+                    "mode": "id"
+                },
+                "sheetName": {
+                    "__rl": true,
+                    "value": "Leads",
+                    "mode": "name"
+                },
+                "columns": {
+                    "mappingMode": "defineBelow",
+                    "value": {
+                        "Status": "={{ $json.body.data.call_status }}",
+                        "Transcript": "={{ $json.body.data.transcript }}",
+                        "Notes": "={{ $json.body.data.notes.join(', ') }}"
+                    },
+                    "matchingColumns": [
+                        "Phone"
+                    ]
+                },
+                "options": {}
+            },
+            "id": "update-call-status",
+            "name": "Update Sheet Status",
+            "type": "n8n-nodes-base.googleSheets",
+            "typeVersion": 4.5,
+            "position": [
+                220,
+                340
+            ]
+        }
+    ],
+    "connections": {
+        "Webhook (Status Update)": {
+            "main": [
+                [
+                    {
+                        "node": "Update Sheet Status",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Schedule Trigger": {
+            "main": [
+                [
+                    {
+                        "node": "Google Sheets (Read)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Google Sheets (Read)": {
+            "main": [
+                [
+                    {
+                        "node": "Trigger Outbound Call",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    }
+}

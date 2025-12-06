@@ -9,7 +9,8 @@ Handles:
 
 import os
 import logging
-from typing import Optional, Dict, Any
+import json
+from typing import Optional, Dict, Any, List
 import asyncpg
 from datetime import datetime
 
@@ -75,6 +76,15 @@ class NeonDB:
             """, phone_number, business_name, contact_name, email, interest_level)
             return row["id"]
     
+    async def get_data_schema(self, slug: str = "default_roofing_agent") -> List[Dict[str, Any]]:
+        """Fetch data schema for the agent."""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT field_name, field_type, description, validation_rules FROM data_schemas WHERE slug = $1",
+                slug
+            )
+            return [dict(row) for row in rows]
+            
     async def log_call(
         self,
         contact_id: int,
@@ -85,19 +95,25 @@ class NeonDB:
         objection: Optional[str] = None,
         notes: Optional[str] = None,
         email_captured: bool = False,
-        call_status: str = "completed"
+        call_status: str = "completed",
+        transcript: Optional[str] = None,
+        captured_data: Optional[Dict[str, Any]] = None
     ) -> int:
         """Log call details, return call_id."""
         async with self.pool.acquire() as conn:
+            # Safe JSON serialization
+            json_data = json.dumps(captured_data) if captured_data else '{}'
+            
             row = await conn.fetchrow("""
                 INSERT INTO calls (
                     contact_id, room_id, prompt_id, duration_seconds,
-                    interest_level, objection, notes, email_captured, call_status
+                    interest_level, objection, notes, email_captured, call_status,
+                    transcript, captured_data
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                 RETURNING id
             """, contact_id, room_id, prompt_id, duration_seconds,
-                interest_level, objection, notes, email_captured, call_status)
+                interest_level, objection, notes, email_captured, call_status, transcript, json_data)
             return row["id"]
     
     async def get_prompt_id(self, name: str = "default_roofing_agent") -> Optional[int]:
@@ -137,14 +153,35 @@ class NeonDB:
             """, days)
             return dict(stats) if stats else {}
     
+    async def get_webhooks(self, slug: str) -> List[Dict[str, Any]]:
+        """Fetch active webhooks for the agent."""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT event_type, target_url, headers 
+                FROM webhook_configs 
+                WHERE slug = $1 AND is_active = true
+            """, slug)
+            return [dict(row) for row in rows]
+            
+    async def get_agent_config(self, slug: str = "default-agent") -> Optional[Dict[str, Any]]:
+        """Fetch agent configuration (greeting, MCP URL, etc)."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT opening_line, mcp_endpoint_url
+                FROM agent_configs
+                WHERE slug = $1 AND is_active = true
+            """, slug)
+            return dict(row) if row else None
+
     async def get_ai_config(self, name: str = "default_telephony_config") -> Optional[Dict[str, Any]]:
-        """Fetch AI configuration (LLM, TTS, STT) by name."""
+        """Fetch AI configuration (LLM, TTS, STT, VAD) by name."""
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
                 SELECT 
                     llm_provider, llm_model, llm_temperature,
                     stt_provider, stt_model, stt_language,
-                    tts_provider, tts_model, tts_voice, tts_language, tts_speed
+                    tts_provider, tts_model, tts_voice, tts_language, tts_speed,
+                    vad_silence_threshold, vad_sensitivity, vad_interruption_threshold
                 FROM ai_configs 
                 WHERE name = $1 AND is_active = true
             """, name)
