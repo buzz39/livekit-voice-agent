@@ -15,7 +15,7 @@ from livekit.agents import (
     get_job_context,
 )
 from livekit.agents.llm import function_tool
-from livekit.plugins import deepgram, openai, cartesia, silero
+from livekit.plugins import deepgram, openai, silero
 from livekit import api
 from livekit.protocol.sip import CreateSIPParticipantRequest
 
@@ -182,7 +182,7 @@ async def entrypoint(ctx: JobContext):
          ai_config = {
             "llm_provider": "openai", "llm_model": "gpt-4o-mini", "llm_temperature": 0.7,
             "stt_provider": "deepgram", "stt_model": "nova-3", "stt_language": "en-US",
-            "tts_provider": "cartesia", "tts_model": "sonic-2", "tts_voice": "a0e99841-438c-4a64-b679-ae501e7d6091"
+            "tts_provider": "openai", "tts_model": "tts-1", "tts_voice": "alloy"
         }
 
     # Load MCP Tools
@@ -195,7 +195,16 @@ async def entrypoint(ctx: JobContext):
     
     llm = openai.LLM(model=ai_config.get("llm_model", "gpt-4o-mini"))
     stt = deepgram.STT(model=ai_config.get("stt_model", "nova-3"), language=ai_config.get("stt_language", "en-US"))
-    tts = cartesia.TTS(model=ai_config.get("tts_model", "sonic-2"), voice=ai_config.get("tts_voice"))
+    
+    # Configure TTS based on provider
+    if ai_config["tts_provider"] == "openai":
+        tts = openai.TTS(
+            model=ai_config.get("tts_model", "tts-1"),
+            voice=ai_config.get("tts_voice", "alloy")
+        )
+    else:
+        logger.warning(f"Unsupported TTS provider: {ai_config['tts_provider']}, using OpenAI")
+        tts = openai.TTS(model="tts-1", voice="alloy")
     
     session = AgentSession(
         vad=silero.VAD.load(),
