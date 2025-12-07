@@ -1,0 +1,49 @@
+# Dockerfile for LiveKit Outbound API Server
+# syntax=docker/dockerfile:1
+
+ARG PYTHON_VERSION=3.13
+FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS base
+
+# Keeps Python from buffering stdout and stderr
+ENV PYTHONUNBUFFERED=1
+
+# Create a non-privileged user
+ARG UID=10001
+RUN adduser \
+    --disabled-password \
+    --gecos "" \
+    --home "/app" \
+    --shell "/sbin/nologin" \
+    --uid "${UID}" \
+    appuser
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    python3-dev \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy dependency files
+COPY pyproject.toml uv.lock ./
+RUN mkdir -p src
+
+# Install Python dependencies
+RUN uv sync --locked
+
+# Copy application
+COPY . .
+
+# Set permissions
+RUN chown -R appuser:appuser /app
+
+# Switch to non-privileged user
+USER appuser
+
+# Expose port for the API
+EXPOSE 8000
+
+# Run server.py
+CMD ["uv", "run", "server.py"]
