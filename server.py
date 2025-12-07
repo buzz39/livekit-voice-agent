@@ -73,11 +73,26 @@ async def initiate_outbound_call(request: OutboundCallRequest):
         except Exception as e:
             logger.warning(f"Room creation ignored (likely exists): {e}")
 
-        # NOTE: SIP Participant creation is now handled by the outbound_agent
-        # independently to ensure the agent is ready before dialing.
-        # We only create the room here. The outbound_agent must be dispatched 
-        # to this room (via Dispatch Rule matching 'outbound-call-*').
-        logger.info(f"Room created. Waiting for outbound_agent to join and dial...")
+        # Explicitly dispatch outbound_agent to the room
+        try:
+            from livekit import api as livekit_api
+            dispatch_metadata = json.dumps({
+                "phone_number": request.phone_number,
+                "business_name": request.business_name,
+                "agent_slug": request.agent_slug
+            })
+            
+            await lk.agent_dispatch.create_dispatch(
+                livekit_api.CreateAgentDispatchRequest(
+                    agent_name="outbound_agent",
+                    room=room_name,
+                    metadata=dispatch_metadata
+                )
+            )
+            logger.info(f"Agent dispatch created for {room_name}")
+        except Exception as e:
+            logger.error(f"Failed to dispatch agent: {e}")
+            return
 
 
 @app.post("/outbound-call")
