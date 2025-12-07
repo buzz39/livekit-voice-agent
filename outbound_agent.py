@@ -212,6 +212,29 @@ async def entrypoint(ctx: JobContext):
         llm=llm,
         tts=tts
     )
+    
+    # Start Whispey session tracking with metadata
+    session_id = None
+    if whispey:
+        try:
+            session_id = whispey.start_session(
+                session=session,
+                phone_number=phone_number,
+                business_name=business_name
+            )
+            logger.info(f"Whispey session started: {session_id}")
+        except Exception as e:
+            logger.error(f"Failed to start Whispey session: {e}")
+    
+    # Register Whispey shutdown callback
+    if whispey and session_id:
+        async def whispey_shutdown():
+            try:
+                await whispey.export(session_id)
+                logger.info(f"Whispey data exported for session: {session_id}")
+            except Exception as e:
+                logger.error(f"Failed to export Whispey data: {e}")
+        ctx.add_shutdown_callback(whispey_shutdown)
 
     # 5. Start Session ASYNCHRONOUSLY (Critical for latency)
     # This ensures the agent is ready to listen immediately upon connection
@@ -247,16 +270,13 @@ async def entrypoint(ctx: JobContext):
     # 7. Wait for session to be fully started (should be quick now)
     await session_start_task
 
-    # 8. Fire Opener
-    # We don't need to wait for participant join because create_sip_participant(wait=True) 
-    # implies they are connected. But let's verify participant logic if needed.
-    
+    # 8. Fire Opener immediately without waiting for LLM
     opening_line = agent_config.get("opening_line") or "Hello? Am I speaking with the business owner?"
-    await session.generate_reply(instructions=opening_line)
+    asyncio.create_task(session.generate_reply(instructions=opening_line))
     
-    # 9. Wait for disconnect
+    # 9. Wait for session to end (participant disconnect or call ends)
     try:
-        await ctx.room.wait_for_disconnect()
+        await session.aclose()
     finally:
         # Logging logic
         duration = 0 # Calculate actual duration
