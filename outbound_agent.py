@@ -274,24 +274,49 @@ async def entrypoint(ctx: JobContext):
     opening_line = agent_config.get("opening_line") or "Hello? Am I speaking with the business owner?"
     asyncio.create_task(session.generate_reply(instructions=opening_line))
     
-    # 9. Wait for session to end (participant disconnect or call ends)
+    # 9. Wait for disconnect
+    call_start_time = datetime.datetime.now()
     try:
-        await session.aclose()
+        # Wait for room disconnect - this is the proper way to wait for call to end
+        await ctx.room.wait_for_disconnect()
+    except AttributeError:
+        # Fallback for newer versions that don't have wait_for_disconnect
+        try:
+            await session.aclose()
+        except:
+            pass
     finally:
-        # Logging logic
-        duration = 0 # Calculate actual duration
-        # ... (Reuse logging logic from telephony_agent.py) ...
+        # Calculate call duration
+        call_end_time = datetime.datetime.now()
+        duration_seconds = int((call_end_time - call_start_time).total_seconds())
         
-        # Simple logging call for now to keep it clean, can expand with full fields
-        await db.log_call(
-            contact_id=contact_id,
-            room_id=ctx.room.name,
-            prompt_id=prompt_id,
-            duration_seconds=30, # Placeholder
-            call_status="completed",
-            transcript="Transcript placeholder",
-            captured_data=call_metadata
-        )
+        # Capture transcript from session history
+        transcript_text = None
+        try:
+            if session.history:
+                transcript_lines = []
+                for item in session.history.items:
+                    role = "Agent" if item.role == "assistant" else "User"
+                    if hasattr(item, 'content') and item.content:
+                        transcript_lines.append(f"{role}: {item.content}")
+                transcript_text = "\n".join(transcript_lines)
+        except Exception as e:
+            logger.error(f"Failed to capture transcript: {e}")
+        
+        # Log call to database
+        try:
+            await db.log_call(
+                contact_id=contact_id,
+                room_id=ctx.room.name,
+                prompt_id=prompt_id,
+                duration_seconds=duration_seconds,
+                call_status="completed",
+                transcript=transcript_text,
+                captured_data=call_metadata
+            )
+            logger.info(f"Call logged successfully. Duration: {duration_seconds}s")
+        except Exception as e:
+            logger.error(f"Failed to log call: {e}")
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
