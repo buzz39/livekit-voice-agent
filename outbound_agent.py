@@ -88,10 +88,16 @@ async def entrypoint(ctx: JobContext):
 
     @function_tool
     async def end_call() -> str:
-        """End the call safely."""
-        logger.info("Agent ending call...")
-        await hangup_call()
-        return ""
+        """End the call when conversation is complete. Use this tool when you've finished your objective, the person asks you to call back later, or they indicate they're not interested."""
+        logger.info("Agent ending call via end_call tool...")
+        # Delete the room to end the call for everyone
+        try:
+            await ctx.api.room.delete_room(
+                api.DeleteRoomRequest(room=ctx.room.name)
+            )
+        except Exception as e:
+            logger.error(f"Failed to delete room: {e}")
+        return "Ending call now"
 
     await ctx.connect()
     logger.info(f"Connected to room {ctx.room.name}")
@@ -163,6 +169,14 @@ async def entrypoint(ctx: JobContext):
     agent_instructions = await db.get_active_prompt(agent_slug) 
     if not agent_instructions:
         agent_instructions = "You are a professional caller."
+    
+    # Add call completion instructions
+    agent_instructions += """\n\n## Call Completion Guidelines:
+- When you have completed your objective, thank the person and use the `end_call` tool to hang up.
+- If the person asks you to call back later or says they're not interested, politely acknowledge and use `end_call`.
+- If the person doesn't respond or seems confused after 2-3 attempts, politely end the call with `end_call`.
+- Always use the `end_call` tool when the conversation is complete - do not wait for the user to hang up.
+"""
 
     # Inject schema
     if schema_fields:
@@ -272,7 +286,7 @@ async def entrypoint(ctx: JobContext):
 
     # 8. Fire Opener immediately without waiting for LLM
     opening_line = agent_config.get("opening_line") or "Hello? Am I speaking with the business owner?"
-    asyncio.create_task(session.generate_reply(instructions=opening_line))
+    session.say(opening_line, allow_interruptions=True)
     
     # 9. Wait for disconnect
     call_start_time = datetime.datetime.now()
