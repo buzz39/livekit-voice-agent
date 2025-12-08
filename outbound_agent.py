@@ -200,15 +200,23 @@ async def entrypoint(ctx: JobContext):
         }
 
     # Load MCP Tools
+    logger.info("Loading MCP tools...")
     mcp_tools = await load_mcp_tools(mcp_url=agent_config.get("mcp_endpoint_url"))
+    logger.info(f"Loaded {len(mcp_tools)} MCP tools")
     
     all_tools = [get_current_time, update_call_data, add_note, end_call] + mcp_tools
+    logger.info(f"Total tools: {len(all_tools)}")
 
     # 4. Initialize Agent Components
+    logger.info("Creating Agent...")
     agent = Agent(instructions=agent_instructions, tools=all_tools)
+    logger.info("Agent created successfully")
     
+    logger.info("Initializing AI models...")
     llm = openai.LLM(model=ai_config.get("llm_model", "gpt-4o-mini"))
+    logger.info(f"LLM initialized: {ai_config.get('llm_model')}")
     stt = deepgram.STT(model=ai_config.get("stt_model", "nova-3"), language=ai_config.get("stt_language", "en-US"))
+    logger.info(f"STT initialized: {ai_config.get('stt_model')}")
     
     # Configure TTS based on provider
     if ai_config["tts_provider"] == "openai":
@@ -220,12 +228,18 @@ async def entrypoint(ctx: JobContext):
         logger.warning(f"Unsupported TTS provider: {ai_config['tts_provider']}, using OpenAI")
         tts = openai.TTS(model="tts-1", voice="alloy")
     
+    logger.info("Loading Silero VAD...")
+    vad = silero.VAD.load()
+    logger.info("VAD loaded successfully")
+    
+    logger.info("Creating AgentSession...")
     session = AgentSession(
-        vad=silero.VAD.load(),
+        vad=vad,
         stt=stt,
         llm=llm,
         tts=tts
     )
+    logger.info("AgentSession created successfully")
     
     # Start Whispey session tracking with metadata
     session_id = None
@@ -252,7 +266,9 @@ async def entrypoint(ctx: JobContext):
 
     # 5. Start Session ASYNCHRONOUSLY (Critical for latency)
     # This ensures the agent is ready to listen immediately upon connection
+    logger.info("Starting AgentSession...")
     session_start_task = asyncio.create_task(session.start(agent=agent, room=ctx.room))
+    logger.info("Session start task created")
 
     # 6. Dial the user (SIP)
     sip_trunk_id = os.getenv("SIP_TRUNK_ID")
