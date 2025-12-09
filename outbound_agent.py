@@ -27,9 +27,11 @@ load_dotenv()
 logger = logging.getLogger("outbound-agent")
 
 # Whispey Observability Integration
+# TEMPORARILY DISABLED due to SDK bug causing premature session termination
 try:
     from whispey import LivekitObserve
-    WHISPEY_ENABLED = True
+    WHISPEY_ENABLED = False  # Force disabled until Whispey bug is fixed
+    logger.warning("Whispey temporarily disabled due to SDK bug")
 except ImportError:
     WHISPEY_ENABLED = False
     logger.warning("Whispey not installed. Install with: pip install whispey")
@@ -260,6 +262,7 @@ async def entrypoint(ctx: JobContext):
             try:
                 session_id = whispey.start_session(
                     session=session,
+                    room=ctx.room,  # Pass the room object
                     phone_number=phone_number,
                     business_name=business_name
                 )
@@ -388,5 +391,5 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     cli.run_app(WorkerOptions(
         entrypoint_fnc=entrypoint,
-        agent_name="outbound_agent" # Distinct name
+        agent_name="telephony_agent" # Distinct name
     ))

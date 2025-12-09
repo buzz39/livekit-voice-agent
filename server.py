@@ -84,7 +84,7 @@ async def initiate_outbound_call(request: OutboundCallRequest):
             
             await lk.agent_dispatch.create_dispatch(
                 livekit_api.CreateAgentDispatchRequest(
-                    agent_name="outbound_agent",  # Must match agent_name in outbound_agent.py line 339
+                    agent_name="telephony_agent",  # Must match agent_name in outbound_agent.py line 339
                     room=room_name,
                     metadata=dispatch_metadata
                 )
