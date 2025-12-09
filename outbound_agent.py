@@ -241,28 +241,47 @@ async def entrypoint(ctx: JobContext):
     )
     logger.info("AgentSession created successfully")
     
-    # Start Whispey session tracking with metadata
-    session_id = None
-    if whispey:
-        try:
-            session_id = whispey.start_session(
-                session=session,
-                phone_number=phone_number,
-                business_name=business_name
-            )
-            logger.info(f"Whispey session started: {session_id}")
-        except Exception as e:
-            logger.error(f"Failed to start Whispey session: {e}")
+    # Add session event handlers for diagnostics
+    @session.on("agent_state_changed")
+    def _on_agent_state(ev):
+        logger.info(f"🤖 Agent state: {ev.old_state} -> {ev.new_state}")
     
-    # Register Whispey shutdown callback
-    if whispey and session_id:
-        async def whispey_shutdown():
+    @session.on("user_state_changed")
+    def _on_user_state(ev):
+        logger.info(f"👤 User state: {ev.old_state} -> {ev.new_state}")
+    
+    logger.info("Session event handlers registered")
+    
+    # Start Whispey session tracking with metadata - wrapped in try-except to prevent crashes
+    session_id = None
+    try:
+        logger.info("Initializing Whispey tracking...")
+        if whispey:
             try:
-                await whispey.export(session_id)
-                logger.info(f"Whispey data exported for session: {session_id}")
+                session_id = whispey.start_session(
+                    session=session,
+                    phone_number=phone_number,
+                    business_name=business_name
+                )
+                logger.info(f"Whispey session started: {session_id}")
             except Exception as e:
-                logger.error(f"Failed to export Whispey data: {e}")
-        ctx.add_shutdown_callback(whispey_shutdown)
+                logger.error(f"Failed to start Whispey session: {e}")
+        
+        # Register Whispey shutdown callback
+        if whispey and session_id:
+            async def whispey_shutdown():
+                try:
+                    await whispey.export(session_id)
+                    logger.info(f"Whispey data exported for session: {session_id}")
+                except Exception as e:
+                    logger.error(f"Failed to export Whispey data: {e}")
+            ctx.add_shutdown_callback(whispey_shutdown)
+            logger.info("Whispey shutdown callback registered")
+    except Exception as e:
+        # Don't let Whispey errors crash the entire call
+        logger.error(f"Whispey setup failed completely, continuing without it: {e}")
+    
+    logger.info("Proceeding to start session...")
 
     # 5. Start Session ASYNCHRONOUSLY (Critical for latency)
     # This ensures the agent is ready to listen immediately upon connection
@@ -296,13 +315,30 @@ async def entrypoint(ctx: JobContext):
         logger.error(f"Failed to dial: {e}")
         await dispatcher.dispatch("call.failed", {"error": str(e)})
         return
+    
+    # Wait for SIP participant to join the room
+    try:
+        logger.info("Waiting for SIP participant to join room...")
+        participant = await ctx.wait_for_participant()
+        logger.info(f"✅ SIP participant joined: {participant.identity}")
+    except Exception as e:
+        logger.error(f"Failed waiting for participant: {e}")
 
     # 7. Wait for session to be fully started (should be quick now)
+    logger.info("Waiting for session start to complete...")
     await session_start_task
+    logger.info("Session start completed")
+    
+    # Give audio tracks time to fully establish before speaking
+    logger.info("Waiting 1 second for audio tracks to stabilize...")
+    await asyncio.sleep(1.0)
+    logger.info("Audio tracks ready")
 
     # 8. Fire Opener immediately without waiting for LLM
     opening_line = agent_config.get("opening_line") or "Hello? Am I speaking with the business owner?"
+    logger.info(f"📢 Sending opening line: '{opening_line}'")
     session.say(opening_line, allow_interruptions=True)
+    logger.info("Opening line sent to session")
     
     # 9. Wait for disconnect
     call_start_time = datetime.datetime.now()
