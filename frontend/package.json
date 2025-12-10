@@ -9,6 +9,10 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^0.9",
+    "@stackframe/stack": "latest",
+    "clsx": "^2",
+    "lucide-react": "^0.408.0",
     "next": "16.0.7",
     "react": "19.2.0",
     "react-dom": "19.2.0"

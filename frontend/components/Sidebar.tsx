@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Users, Phone, Settings } from 'lucide-react';
+import { LayoutDashboard, Users, Phone, Settings, Database } from 'lucide-react';
 import { clsx } from 'clsx';
 
 const navigation = [
     { name: 'Overview', href: '/dashboard', icon: LayoutDashboard },
     { name: 'Agents', href: '/dashboard/agents', icon: Users },
     { name: 'Call Logs', href: '/dashboard/calls', icon: Phone },
+    { name: 'Database', href: '/dashboard/database', icon: Database },
     // { name: 'Settings', href: '/dashboard/settings', icon: Settings },
 ];
 
