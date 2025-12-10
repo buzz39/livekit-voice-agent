@@ -27,11 +27,9 @@ load_dotenv()
 logger = logging.getLogger("outbound-agent")
 
 # Whispey Observability Integration
-# TEMPORARILY DISABLED due to SDK bug causing premature session termination
 try:
     from whispey import LivekitObserve
-    WHISPEY_ENABLED = False  # Force disabled until Whispey bug is fixed
-    logger.warning("Whispey temporarily disabled due to SDK bug")
+    WHISPEY_ENABLED = True
 except ImportError:
     WHISPEY_ENABLED = False
     logger.warning("Whispey not installed. Install with: pip install whispey")
@@ -90,16 +88,10 @@ async def entrypoint(ctx: JobContext):
 
     @function_tool
     async def end_call() -> str:
-        """End the call when conversation is complete. Use this tool when you've finished your objective, the person asks you to call back later, or they indicate they're not interested."""
-        logger.info("Agent ending call via end_call tool...")
-        # Delete the room to end the call for everyone
-        try:
-            await ctx.api.room.delete_room(
-                api.DeleteRoomRequest(room=ctx.room.name)
-            )
-        except Exception as e:
-            logger.error(f"Failed to delete room: {e}")
-        return "Ending call now"
+        """End the call safely."""
+        logger.info("Agent ending call...")
+        await hangup_call()
+        return ""
 
     await ctx.connect()
     logger.info(f"Connected to room {ctx.room.name}")
@@ -171,14 +163,6 @@ async def entrypoint(ctx: JobContext):
     agent_instructions = await db.get_active_prompt(agent_slug) 
     if not agent_instructions:
         agent_instructions = "You are a professional caller."
-    
-    # Add call completion instructions
-    agent_instructions += """\n\n## Call Completion Guidelines:
-- When you have completed your objective, thank the person and use the `end_call` tool to hang up.
-- If the person asks you to call back later or says they're not interested, politely acknowledge and use `end_call`.
-- If the person doesn't respond or seems confused after 2-3 attempts, politely end the call with `end_call`.
-- Always use the `end_call` tool when the conversation is complete - do not wait for the user to hang up.
-"""
 
     # Inject schema
     if schema_fields:
@@ -202,23 +186,15 @@ async def entrypoint(ctx: JobContext):
         }
 
     # Load MCP Tools
-    logger.info("Loading MCP tools...")
     mcp_tools = await load_mcp_tools(mcp_url=agent_config.get("mcp_endpoint_url"))
-    logger.info(f"Loaded {len(mcp_tools)} MCP tools")
     
     all_tools = [get_current_time, update_call_data, add_note, end_call] + mcp_tools
-    logger.info(f"Total tools: {len(all_tools)}")
 
     # 4. Initialize Agent Components
-    logger.info("Creating Agent...")
     agent = Agent(instructions=agent_instructions, tools=all_tools)
-    logger.info("Agent created successfully")
     
-    logger.info("Initializing AI models...")
     llm = openai.LLM(model=ai_config.get("llm_model", "gpt-4o-mini"))
-    logger.info(f"LLM initialized: {ai_config.get('llm_model')}")
     stt = deepgram.STT(model=ai_config.get("stt_model", "nova-3"), language=ai_config.get("stt_language", "en-US"))
-    logger.info(f"STT initialized: {ai_config.get('stt_model')}")
     
     # Configure TTS based on provider
     if ai_config["tts_provider"] == "openai":
@@ -230,67 +206,39 @@ async def entrypoint(ctx: JobContext):
         logger.warning(f"Unsupported TTS provider: {ai_config['tts_provider']}, using OpenAI")
         tts = openai.TTS(model="tts-1", voice="alloy")
     
-    logger.info("Loading Silero VAD...")
-    vad = silero.VAD.load()
-    logger.info("VAD loaded successfully")
-    
-    logger.info("Creating AgentSession...")
     session = AgentSession(
-        vad=vad,
+        vad=silero.VAD.load(),
         stt=stt,
         llm=llm,
         tts=tts
     )
-    logger.info("AgentSession created successfully")
     
-    # Add session event handlers for diagnostics
-    @session.on("agent_state_changed")
-    def _on_agent_state(ev):
-        logger.info(f"🤖 Agent state: {ev.old_state} -> {ev.new_state}")
-    
-    @session.on("user_state_changed")
-    def _on_user_state(ev):
-        logger.info(f"👤 User state: {ev.old_state} -> {ev.new_state}")
-    
-    logger.info("Session event handlers registered")
-    
-    # Start Whispey session tracking with metadata - wrapped in try-except to prevent crashes
+    # Start Whispey session tracking with metadata
     session_id = None
-    try:
-        logger.info("Initializing Whispey tracking...")
-        if whispey:
-            try:
-                session_id = whispey.start_session(
-                    session=session,
-                    room=ctx.room,  # Pass the room object
-                    phone_number=phone_number,
-                    business_name=business_name
-                )
-                logger.info(f"Whispey session started: {session_id}")
-            except Exception as e:
-                logger.error(f"Failed to start Whispey session: {e}")
-        
-        # Register Whispey shutdown callback
-        if whispey and session_id:
-            async def whispey_shutdown():
-                try:
-                    await whispey.export(session_id)
-                    logger.info(f"Whispey data exported for session: {session_id}")
-                except Exception as e:
-                    logger.error(f"Failed to export Whispey data: {e}")
-            ctx.add_shutdown_callback(whispey_shutdown)
-            logger.info("Whispey shutdown callback registered")
-    except Exception as e:
-        # Don't let Whispey errors crash the entire call
-        logger.error(f"Whispey setup failed completely, continuing without it: {e}")
+    if whispey:
+        try:
+            session_id = whispey.start_session(
+                session=session,
+                phone_number=phone_number,
+                business_name=business_name
+            )
+            logger.info(f"Whispey session started: {session_id}")
+        except Exception as e:
+            logger.error(f"Failed to start Whispey session: {e}")
     
-    logger.info("Proceeding to start session...")
+    # Register Whispey shutdown callback
+    if whispey and session_id:
+        async def whispey_shutdown():
+            try:
+                await whispey.export(session_id)
+                logger.info(f"Whispey data exported for session: {session_id}")
+            except Exception as e:
+                logger.error(f"Failed to export Whispey data: {e}")
+        ctx.add_shutdown_callback(whispey_shutdown)
 
     # 5. Start Session ASYNCHRONOUSLY (Critical for latency)
     # This ensures the agent is ready to listen immediately upon connection
-    logger.info("Starting AgentSession...")
     session_start_task = asyncio.create_task(session.start(agent=agent, room=ctx.room))
-    logger.info("Session start task created")
 
     # 6. Dial the user (SIP)
     sip_trunk_id = os.getenv("SIP_TRUNK_ID")
@@ -318,30 +266,13 @@ async def entrypoint(ctx: JobContext):
         logger.error(f"Failed to dial: {e}")
         await dispatcher.dispatch("call.failed", {"error": str(e)})
         return
-    
-    # Wait for SIP participant to join the room
-    try:
-        logger.info("Waiting for SIP participant to join room...")
-        participant = await ctx.wait_for_participant()
-        logger.info(f"✅ SIP participant joined: {participant.identity}")
-    except Exception as e:
-        logger.error(f"Failed waiting for participant: {e}")
 
     # 7. Wait for session to be fully started (should be quick now)
-    logger.info("Waiting for session start to complete...")
     await session_start_task
-    logger.info("Session start completed")
-    
-    # Give audio tracks time to fully establish before speaking
-    logger.info("Waiting 1 second for audio tracks to stabilize...")
-    await asyncio.sleep(1.0)
-    logger.info("Audio tracks ready")
 
     # 8. Fire Opener immediately without waiting for LLM
     opening_line = agent_config.get("opening_line") or "Hello? Am I speaking with the business owner?"
-    logger.info(f"📢 Sending opening line: '{opening_line}'")
-    session.say(opening_line, allow_interruptions=True)
-    logger.info("Opening line sent to session")
+    asyncio.create_task(session.generate_reply(instructions=opening_line))
     
     # 9. Wait for disconnect
     call_start_time = datetime.datetime.now()
@@ -391,5 +322,5 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     cli.run_app(WorkerOptions(
         entrypoint_fnc=entrypoint,
-        agent_name="telephony_agent" # Distinct name
+        agent_name="outbound_agent" # Distinct name
     ))
