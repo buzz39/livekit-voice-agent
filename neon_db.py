@@ -188,13 +188,8 @@ class NeonDB:
             return dict(row) if row else None
 
 
-# Global instance
-_db_instance: Optional[NeonDB] = None
-
 async def get_db() -> NeonDB:
-    """Get or create global database instance."""
-    global _db_instance
-    if _db_instance is None:
-        _db_instance = NeonDB()
-        await _db_instance.connect()
-    return _db_instance
+    """Create a new database instance for each job (not reused across event loops)."""
+    db = NeonDB()
+    await db.connect()
+    return db

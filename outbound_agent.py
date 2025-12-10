@@ -223,9 +223,10 @@ async def entrypoint(ctx: JobContext):
     if whispey:
         try:
             session_id = whispey.start_session(
-                session=session,
+                session,
+                room=ctx.room,
                 phone_number=phone_number,
-                business_name=business_name
+                customer_name=business_name
             )
             logger.info(f"Whispey session started: {session_id}")
         except Exception as e:
@@ -275,9 +276,12 @@ async def entrypoint(ctx: JobContext):
     # 7. Wait for session to be fully started (should be quick now)
     await session_start_task
 
-    # 8. Fire Opener immediately without waiting for LLM
+    # 8. Fire Opener using session.say() for immediate audio output
     opening_line = agent_config.get("opening_line") or "Hello? Am I speaking with the business owner?"
-    asyncio.create_task(session.generate_reply(instructions=opening_line))
+    try:
+        await session.say(opening_line, allow_interruptions=True)
+    except Exception as e:
+        logger.warning(f"Failed to play opening line: {e}")
     
     # 9. Wait for disconnect
     call_start_time = datetime.datetime.now()
@@ -327,5 +331,5 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     cli.run_app(WorkerOptions(
         entrypoint_fnc=entrypoint,
-        agent_name="outbound_agent" # Distinct name
+        agent_name="telephony_agent" # Distinct name
     ))
