@@ -29,10 +29,13 @@ logger = logging.getLogger("outbound-agent")
 # Whispey Observability Integration
 try:
     from whispey import LivekitObserve
-    WHISPEY_ENABLED = True
+    WHISPEY_AVAILABLE = True
 except ImportError:
-    WHISPEY_ENABLED = False
+    WHISPEY_AVAILABLE = False
     logger.warning("Whispey not installed. Install with: pip install whispey")
+
+# Check if Whispey is enabled via environment variable (default: False)
+WHISPEY_ENABLED = os.getenv("ENABLE_WHISPEY", "false").lower() in ("true", "1", "yes")
 
 async def hangup_call():
     """End the call for all participants by deleting the room."""
@@ -98,7 +101,7 @@ async def entrypoint(ctx: JobContext):
     
     # Initialize Whispey observability if enabled
     whispey = None
-    if WHISPEY_ENABLED:
+    if WHISPEY_ENABLED and WHISPEY_AVAILABLE:
         whispey_api_key = os.getenv("WHISPEY_API_KEY")
         whispey_agent_id = os.getenv("WHISPEY_AGENT_ID", "outbound-agent")
         if whispey_api_key:
@@ -109,6 +112,8 @@ async def entrypoint(ctx: JobContext):
                 logger.error(f"Failed to initialize Whispey: {e}")
         else:
             logger.warning("WHISPEY_API_KEY not set, observability disabled")
+    elif WHISPEY_ENABLED and not WHISPEY_AVAILABLE:
+        logger.warning("ENABLE_WHISPEY is set but Whispey package is not installed")
 
     # 2. Extract outbound details from Job Metadata
     # Note: server.py puts this in `metadata` of the room, but for pure agent dispatch
