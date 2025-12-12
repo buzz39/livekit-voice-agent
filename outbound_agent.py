@@ -115,27 +115,49 @@ async def entrypoint(ctx: JobContext):
     elif WHISPEY_ENABLED and not WHISPEY_AVAILABLE:
         logger.warning("ENABLE_WHISPEY is set but Whispey package is not installed")
 
-    # 2. Extract outbound details from Job Metadata
-    # Note: server.py puts this in `metadata` of the room, but for pure agent dispatch
-    # it's often in ctx.job.metadata. We'll check both.
-    
+    # 2. Extract outbound metadata
     initial_metadata = {}
-    if ctx.job.metadata:
+
+    # --- 1. Try ctx.job.metadata ---
+    if ctx.job and ctx.job.metadata:
         try:
-            initial_metadata = json.loads(ctx.job.metadata)
-        except:
-            pass
-            
-    if not initial_metadata and ctx.room.metadata:
+            meta = ctx.job.metadata
+            if isinstance(meta, (bytes, bytearray)):
+                meta = meta.decode("utf-8")
+            initial_metadata = json.loads(meta)
+            logger.info(f"[metadata] Loaded from ctx.job.metadata: {initial_metadata}")
+        except Exception as e:
+            logger.warning(f"[metadata] Failed to parse ctx.job.metadata: {e}")
+
+    # --- 2. If empty, try ctx.room.metadata ---
+    if not initial_metadata and ctx.room and ctx.room.metadata:
         try:
-            initial_metadata = json.loads(ctx.room.metadata)
+            meta = ctx.room.metadata
+            if isinstance(meta, (bytes, bytearray)):
+                meta = meta.decode("utf-8")
+            initial_metadata = json.loads(meta)
+            logger.info(f"[metadata] Loaded from ctx.room.metadata: {initial_metadata}")
+        except Exception as e:
+            logger.warning(f"[metadata] Failed to parse ctx.room.metadata: {e}")
+
+    # --- 3. Normalize nested metadata: sometimes stored as {"metadata": "{...json...}"} ---
+    if isinstance(initial_metadata, dict) and "metadata" in initial_metadata:
+        try:
+            nested = initial_metadata["metadata"]
+            if isinstance(nested, (bytes, bytearray)):
+                nested = nested.decode("utf-8")
+            initial_metadata = json.loads(nested)
+            logger.info(f"[metadata] Loaded nested metadata: {initial_metadata}")
         except:
             pass
 
+    # Extract fields safely
     phone_number = initial_metadata.get("phone_number")
     business_name = initial_metadata.get("business_name", "there")
     agent_slug = initial_metadata.get("agent_slug", "default_roofing_agent")
-    
+
+    logger.info(f"Parsed metadata → phone: {phone_number}, business: {business_name}, slug: {agent_slug}")
+
     if not phone_number:
         logger.error("No phone number found in metadata. Cannot place outbound call.")
         return
@@ -278,6 +300,15 @@ async def entrypoint(ctx: JobContext):
 
     # 8. Fire Opener using session.say() for immediate audio output
     opening_line = agent_config.get("opening_line") or "Hello? Am I speaking with the business owner?"
+    
+    # Dynamic Business Name Injection
+    if business_name:
+        if "{business_name}" in opening_line:
+            opening_line = opening_line.format(business_name=business_name)
+        elif "Am I speaking with the owner?" in opening_line and business_name != "Local Tester":
+            opening_line = opening_line.replace("Am I speaking with the owner?", f"Am I speaking with the owner of {business_name}?")
+            
+    logger.info(f"Final Opening Line: '{opening_line}'")
     try:
         await session.say(opening_line, allow_interruptions=True)
     except Exception as e:
