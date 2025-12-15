@@ -1,8 +1,15 @@
+export const dynamic = 'force-dynamic';
+
 import { getCallLogs } from '@/utils/actions';
 import { Clock, Phone, FileText } from 'lucide-react';
 
 export default async function CallsPage() {
-    const calls = await getCallLogs();
+    let calls: any[] = [];
+    try {
+        calls = await getCallLogs();
+    } catch (e) {
+        console.error("Failed to load call logs", e);
+    }
 
     return (
         <div className="space-y-6">

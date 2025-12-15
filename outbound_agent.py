@@ -94,7 +94,7 @@ async def entrypoint(ctx: JobContext):
     egress_manager = EgressManager(ctx.api)
 
     # AI Config
-    ai_config = await load_ai_config(db)
+    ai_config = await load_ai_config(db, agent_slug)
 
     # 4. Initialize Agent Components
 

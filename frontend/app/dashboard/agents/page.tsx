@@ -1,9 +1,17 @@
+export const dynamic = 'force-dynamic';
+
 import { getAgents, createAgent } from '@/utils/actions';
 import Link from 'next/link';
 import { Plus, Bot } from 'lucide-react';
 
 export default async function AgentsPage() {
-    const agents = await getAgents();
+    let agents: any[] = [];
+    try {
+        agents = await getAgents();
+    } catch (e) {
+        console.error("Failed to load agents", e);
+        // Fallback or empty state
+    }
 
     return (
         <div className="space-y-6">

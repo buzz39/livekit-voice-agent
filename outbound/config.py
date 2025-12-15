@@ -42,11 +42,19 @@ async def prepare_instructions(db: Any, agent_slug: str, schema_fields: Any) -> 
 
     return agent_instructions
 
-async def load_ai_config(db: Any) -> Dict[str, Any]:
+async def load_ai_config(db: Any, agent_slug: str = None) -> Dict[str, Any]:
     """
     Loads AI configuration (LLM/STT/TTS settings).
+    Prioritizes agent-specific config (using slug), falls back to default.
     """
-    ai_config = await db.get_ai_config("default_telephony_config")
+    ai_config = None
+    if agent_slug:
+        # Try to find config named after the agent slug
+        ai_config = await db.get_ai_config(agent_slug)
+
+    if not ai_config:
+        ai_config = await db.get_ai_config("default_telephony_config")
+
     if not ai_config:
         ai_config = {
             "llm_provider": "openai",
