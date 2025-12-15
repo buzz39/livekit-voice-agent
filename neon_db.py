@@ -172,7 +172,7 @@ class NeonDB:
                     COUNT(CASE WHEN email_captured = true THEN 1 END) as emails_captured,
                     AVG(duration_seconds) as avg_duration
                 FROM calls
-                WHERE created_at > NOW() - INTERVAL '$1 days'
+                WHERE created_at > NOW() - make_interval(days := $1)
             """, days)
             return dict(stats) if stats else {}
 
