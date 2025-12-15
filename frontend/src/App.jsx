@@ -4,42 +4,53 @@ import Terminal from './components/dashboard/Terminal';
 import StatsCard from './components/dashboard/StatsCard';
 import RiskBadge from './components/dashboard/RiskBadge';
 import ActiveCallPanel from './components/dashboard/ActiveCallPanel';
+import { getStats, getRecentCalls, startOutboundCall } from './api';
 
 function App() {
   const [callStatus, setCallStatus] = useState('idle'); // idle, connecting, active, ended
   const [logs, setLogs] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [recentCalls, setRecentCalls] = useState([]);
 
-  // Simulation of logs coming in
+  // Fetch stats and recent calls on mount
   useEffect(() => {
-    if (callStatus === 'active') {
-      const interval = setInterval(() => {
-        const newLog = Math.random() > 0.5 ? {
-          role: 'agent',
-          text: 'This is the AI agent speaking, how can I help you today?',
-          timestamp: new Date().toLocaleTimeString([], { hour12: false })
-        } : {
-          role: 'user',
-          text: 'I am calling to discuss my recent payment.',
-          timestamp: new Date().toLocaleTimeString([], { hour12: false })
-        };
+    async function fetchData() {
+      const statsData = await getStats();
+      if (statsData) setStats(statsData);
 
-        setLogs(prev => [...prev, newLog]);
-      }, 3000);
-
-      return () => clearInterval(interval);
+      const callsData = await getRecentCalls();
+      if (callsData) setRecentCalls(callsData);
     }
-  }, [callStatus]);
+    fetchData();
+    // Refresh every 30 seconds
+    const interval = setInterval(fetchData, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
-  const handleStartCall = (number) => {
+  const handleStartCall = async (number) => {
     setCallStatus('connecting');
-    setTimeout(() => {
-      setCallStatus('active');
-      setLogs([{
+    setLogs([{
+      role: 'system',
+      text: `Initiating call to ${number}...`,
+      timestamp: new Date().toLocaleTimeString([], { hour12: false })
+    }]);
+
+    try {
+      await startOutboundCall(number);
+      setCallStatus('active'); // In a real app, we'd wait for a socket event saying 'connected'
+      setLogs(prev => [...prev, {
         role: 'system',
-        text: `Dialing ${number}...`,
+        text: `Call queued successfully.`,
         timestamp: new Date().toLocaleTimeString([], { hour12: false })
       }]);
-    }, 1500);
+    } catch (error) {
+      setCallStatus('idle');
+      setLogs(prev => [...prev, {
+        role: 'system',
+        text: `Error starting call: ${error.message}`,
+        timestamp: new Date().toLocaleTimeString([], { hour12: false })
+      }]);
+    }
   };
 
   const handleEndCall = () => {
@@ -49,6 +60,15 @@ function App() {
       text: 'Call ended.',
       timestamp: new Date().toLocaleTimeString([], { hour12: false })
     }]);
+    // Optionally trigger a stats refresh
+  };
+
+  // Helper to format duration
+  const formatDuration = (seconds) => {
+      if (!seconds) return '0s';
+      const m = Math.floor(seconds / 60);
+      const s = Math.round(seconds % 60);
+      return `${m}m ${s}s`;
   };
 
   return (
@@ -56,9 +76,24 @@ function App() {
       <div className="grid grid-cols-12 gap-6 h-[calc(100vh-6rem)]">
         {/* Top Row: Stats */}
         <div className="col-span-12 grid grid-cols-1 md:grid-cols-4 gap-6 h-32 md:h-40">
-          <StatsCard title="Recovery Rate" value="68.4%" subtext="+2.4% vs last week" chartColor="#10b981" />
-          <StatsCard title="Avg Call Duration" value="3m 42s" subtext="-12s vs last week" chartColor="#6366f1" />
-          <StatsCard title="Active Calls" value="12" subtext="3 agents idle" chartColor="#f59e0b" />
+          <StatsCard
+            title="Total Calls"
+            value={stats ? stats.total_calls : "..."}
+            subtext={stats ? "Last 7 days" : "Loading..."}
+            chartColor="#10b981"
+          />
+          <StatsCard
+            title="Avg Duration"
+            value={stats ? formatDuration(stats.avg_duration) : "..."}
+            subtext={stats ? "Last 7 days" : "Loading..."}
+            chartColor="#6366f1"
+          />
+          <StatsCard
+            title="Emails Captured"
+            value={stats ? stats.emails_captured : "..."}
+            subtext={stats ? "Last 7 days" : "Loading..."}
+            chartColor="#f59e0b"
+          />
           <div className="bg-slate-900 border border-slate-800 rounded-lg p-5 flex flex-col justify-center items-center h-full">
             <div className="text-slate-400 text-sm font-medium uppercase tracking-wider mb-2">Current Risk Level</div>
             <RiskBadge level="low" />
@@ -84,31 +119,30 @@ function App() {
             </div>
 
             <div className="h-1/2 bg-slate-900 border border-slate-800 rounded-lg p-6 overflow-y-auto">
-                <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-4">Debtor Profile</h3>
+                <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-4">Recent Calls</h3>
                 <div className="space-y-4">
-                    <div>
-                        <div className="text-xs text-slate-500">Name</div>
-                        <div className="font-medium text-white">John Doe</div>
-                    </div>
-                    <div>
-                        <div className="text-xs text-slate-500">Account ID</div>
-                        <div className="font-mono text-sm text-slate-300">#8992-3321</div>
-                    </div>
-                    <div>
-                        <div className="text-xs text-slate-500">Total Outstanding</div>
-                        <div className="font-bold text-emerald-400">$1,250.00</div>
-                    </div>
-                    <div>
-                        <div className="text-xs text-slate-500">Last Contact</div>
-                        <div className="text-sm text-slate-300">2 days ago via Email</div>
-                    </div>
-                    <div className="pt-2 border-t border-slate-800">
-                        <div className="text-xs text-slate-500 mb-2">Tags</div>
-                        <div className="flex flex-wrap gap-2">
-                            <span className="px-2 py-1 bg-slate-800 rounded text-xs text-slate-300 border border-slate-700">Strategic Defaulter</span>
-                            <span className="px-2 py-1 bg-slate-800 rounded text-xs text-slate-300 border border-slate-700">High Net Worth</span>
+                    {recentCalls.map((call) => (
+                        <div key={call.id} className="p-3 bg-slate-800 rounded border border-slate-700">
+                            <div className="flex justify-between items-start mb-1">
+                                <div className="font-medium text-white text-sm">{call.phone_number || 'Unknown'}</div>
+                                <div className={`text-xs px-2 py-0.5 rounded ${call.call_status === 'completed' ? 'bg-emerald-900 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
+                                    {call.call_status}
+                                </div>
+                            </div>
+                            <div className="flex justify-between text-xs text-slate-400">
+                                <span>{call.business_name || 'No Business'}</span>
+                                <span>{call.duration_seconds ? `${call.duration_seconds}s` : '-'}</span>
+                            </div>
+                            <div className="text-xs text-slate-500 mt-1">
+                                {call.created_at ? new Date(call.created_at).toLocaleString() : ''}
+                            </div>
                         </div>
-                    </div>
+                    ))}
+                    {recentCalls.length === 0 && (
+                        <div className="text-center text-slate-500 text-sm py-4">
+                            No recent calls found.
+                        </div>
+                    )}
                 </div>
             </div>
         </div>
