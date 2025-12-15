@@ -64,7 +64,7 @@ def create_tools(
 
     @function_tool
     async def end_call() -> str:
-        """End the call safely and immediately."""
+        """End the call safely and immediately. MUST be called to terminate the connection."""
         logger.info("Agent requested end_call")
         # Immediate hangup to prevent dead air.
         # The 'disconnected' event will trigger finalize_call() for data persistence.
