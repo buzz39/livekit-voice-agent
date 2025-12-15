@@ -32,15 +32,6 @@ from livekit import api
 from mcp_integration import load_mcp_tools
 from neon_db import get_db
 
-# Whispey Observability Integration
-try:
-    from whispey import LivekitObserve
-    WHISPEY_ENABLED = True
-except ImportError:
-    WHISPEY_ENABLED = False
-    logger.warning("Whispey not installed. Install with: pip install whispey")
-
-
 load_dotenv()
 logger = logging.getLogger("telephony-agent")
 
@@ -49,21 +40,17 @@ AGENT_INSTRUCTIONS = None  # Will be fetched from database
 
 
 async def hangup_call():
-    """End the call for all participants by deleting the room."""
+    """End the call for all participants."""
     ctx = get_job_context()
     if ctx is None:
         logger.warning("Not running in a job context, cannot hang up")
         return
     
     try:
-        await ctx.api.room.delete_room(
-            api.DeleteRoomRequest(
-                room=ctx.room.name,
-            )
-        )
-        logger.info(f"Call ended - room {ctx.room.name} deleted")
+        await ctx.room.disconnect()
+        logger.info(f"Disconnected from room {ctx.room.name}")
     except Exception as e:
-        logger.error(f"Failed to delete room: {e}")
+        logger.error(f"Failed to disconnect room: {e}")
 
 
 from webhook_dispatcher import WebhookDispatcher
@@ -117,27 +104,6 @@ async def entrypoint(ctx: JobContext):
         return ""
 
     await ctx.connect()
-    
-    # Initialize Whispey observability if enabled
-    whispey = None
-    if WHISPEY_ENABLED:
-        whispey_api_key = os.getenv("WHISPEY_API_KEY")
-        whispey_agent_id = os.getenv("WHISPEY_INBOUND_AGENT_ID", os.getenv("WHISPEY_AGENT_ID", "inbound-agent"))
-        whispey_base_url = os.getenv("WHISPEY_BASE_URL")  # Optional self-hosted URL
-
-        if whispey_api_key:
-            try:
-                # Add base_url if present
-                if whispey_base_url:
-                    whispey = LivekitObserve(agent_id=whispey_agent_id, apikey=whispey_api_key, base_url=whispey_base_url)
-                else:
-                    whispey = LivekitObserve(agent_id=whispey_agent_id, apikey=whispey_api_key)
-
-                logger.info(f"Whispey observability enabled for agent: {whispey_agent_id}")
-            except Exception as e:
-                logger.error(f"Failed to initialize Whispey: {e}")
-        else:
-            logger.warning("WHISPEY_API_KEY not set, observability disabled")
     
     # Wait for participant (caller) to join
     participant = await ctx.wait_for_participant()
@@ -340,19 +306,6 @@ async def entrypoint(ctx: JobContext):
         tts=tts
     )
     
-    # Start Whispey session tracking with metadata
-    session_id = None
-    if whispey:
-        try:
-            session_id = whispey.start_session(
-                session=session,
-                phone_number=phone_number,
-                business_name=business_name
-            )
-            logger.info(f"Whispey session started: {session_id}")
-        except Exception as e:
-            logger.error(f"Failed to start Whispey session: {e}")
-    
     # Track if call was ended by agent
     call_ended_by_agent = False
     
@@ -365,16 +318,6 @@ async def entrypoint(ctx: JobContext):
             # If user hung up, we should end the session
             if not call_ended_by_agent:
                 logger.info("User hung up, ending session")
-    
-    # Register Whispey shutdown callback
-    if whispey and session_id:
-        async def whispey_shutdown():
-            try:
-                await whispey.export(session_id)
-                logger.info(f"Whispey data exported for session: {session_id}")
-            except Exception as e:
-                logger.error(f"Failed to export Whispey data: {e}")
-        ctx.add_shutdown_callback(whispey_shutdown)
     
     # Start the agent session
     call_start_time = datetime.datetime.now()
@@ -396,44 +339,43 @@ async def entrypoint(ctx: JobContext):
         # Calculate call duration
         call_end_time = datetime.datetime.now()
         duration_seconds = int((call_end_time - call_start_time).total_seconds())
-    
-        # Fire call.ended event
-        if 'dispatcher' in locals() and dispatcher:
-            # Capture transcript from session history
-            transcript_text = None
-            try:
-                if session.history:
-                    transcript_lines = []
-                    for item in session.history.items:
-                        role = "Agent" if item.role == "assistant" else "User"
-                        if hasattr(item, 'content') and item.content:
-                            transcript_lines.append(f"{role}: {item.content}")
-                    transcript_text = "\n".join(transcript_lines)
-            except Exception as e:
-                logger.error(f"Failed to capture transcript for webhook: {e}")
 
-            await dispatcher.dispatch("call.ended", {
-                "duration_seconds": duration_seconds,
-                "call_status": "completed",
-                "disconnect_reason": "unknown", # livekit doesn't strictly provide this yet in simple API
-                "transcript": transcript_text,
-                "captured_data": call_metadata,
-                "notes": call_metadata.get("notes", [])
-            })
-
-        # Capture transcript from session history
+        # Capture transcript from session history (Unified)
         transcript_text = None
+        transcript_json = []
         try:
             if session.history:
                 transcript_lines = []
                 for item in session.history.items:
-                    role = "Agent" if item.role == "assistant" else "User"
-                    if hasattr(item, 'content') and item.content:
-                        transcript_lines.append(f"{role}: {item.content}")
+                    role = getattr(item, 'role', None)
+                    content = getattr(item, 'content', None)
+
+                    if role and content:
+                        transcript_json.append({"role": role, "content": content})
+
+                    display_role = "Agent" if role == "assistant" else "User"
+                    if content:
+                        transcript_lines.append(f"{display_role}: {content}")
+
                 transcript_text = "\n".join(transcript_lines)
+
+                # Add structured transcript to call_metadata
+                call_metadata["transcript_json"] = transcript_json
+
                 logger.info(f"Captured transcript with {len(transcript_lines)} turns")
         except Exception as e:
             logger.error(f"Failed to capture transcript: {e}")
+
+        # Fire call.ended event
+        if 'dispatcher' in locals() and dispatcher:
+            await dispatcher.dispatch("call.ended", {
+                "duration_seconds": duration_seconds,
+                "call_status": "completed",
+                "disconnect_reason": "unknown",
+                "transcript": transcript_text,
+                "captured_data": call_metadata,
+                "notes": call_metadata.get("notes", [])
+            })
         
         # Log the call to database with captured metadata
         try:

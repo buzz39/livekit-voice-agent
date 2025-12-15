@@ -43,19 +43,32 @@ async def finalize_call(
 
     # Capture transcript
     transcript_text = None
+    transcript_json = []
     try:
         if getattr(session, "history", None):
             transcript_lines = []
             items = getattr(session.history, "items", None) or getattr(session.history, "messages", None) or []
             for item in items:
-                role = "Agent" if getattr(item, "role", None) == "assistant" else "User"
-                text = getattr(item, "content", None) or getattr(item, "text", None) or ""
-                if text:
-                    transcript_lines.append(f"{role}: {text}")
+                role = getattr(item, "role", None)
+                content = getattr(item, "content", None) or getattr(item, "text", None) or ""
+
+                # Build JSON entry
+                if role and content:
+                    transcript_json.append({"role": role, "content": content})
+
+                # Build Text entry
+                display_role = "Agent" if role == "assistant" else "User"
+                if content:
+                    transcript_lines.append(f"{display_role}: {content}")
+
             transcript_text = "\n".join(transcript_lines)
+
+            # Add structured transcript to call_metadata for Observability
+            call_metadata["transcript_json"] = transcript_json
+
             logger.info(f"Transcript captured ({len(transcript_lines)} lines)")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to capture transcript: {e}")
 
     # Persist to DB immediately
     try:
