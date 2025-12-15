@@ -132,15 +132,16 @@ async def entrypoint(ctx: JobContext):
     # 5. Start Session ASYNCHRONOUSLY (Critical for latency)
     session_start_task = asyncio.create_task(session.start(agent=agent, room=ctx.room))
 
-    # ===================== RECORDING =====================
-    await start_recording(ctx, egress_manager, call_metadata, dispatcher, contact_id, phone_number)
-    # =====================================================
-
     # 6. Dial the user (SIP)
     # This function handles the dialing and basic error reporting
     dial_success = await dial_participant(ctx, phone_number, business_name, dispatcher)
     if not dial_success:
         return
+
+    # ===================== RECORDING =====================
+    # Start recording only after the call is answered
+    await start_recording(ctx, egress_manager, call_metadata, dispatcher, contact_id, phone_number)
+    # =====================================================
 
     # 8. Fire Opener using session.say()
     opening_line = agent_config.get("opening_line") or "Hello? Am I speaking with the business owner?"
@@ -229,7 +230,8 @@ async def entrypoint(ctx: JobContext):
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     # Set default load threshold to 0.9 to avoid flapping in dev/high-load envs
-    os.environ.setdefault("LIVEKIT_WORKER_LOAD_THRESHOLD", "0.9")
+    # Note: Ensure this is a valid float string.
+    # os.environ.setdefault("LIVEKIT_WORKER_LOAD_THRESHOLD", "0.9")
     cli.run_app(
         WorkerOptions(
             entrypoint_fnc=entrypoint,
