@@ -9,6 +9,7 @@ from livekit import api
 from livekit.protocol.sip import CreateSIPParticipantRequest
 from livekit.protocol.room import CreateRoomRequest
 from dotenv import load_dotenv
+from neon_db import get_db, NeonDB
 
 # Load environment variables
 load_dotenv()
@@ -18,6 +19,22 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("outbound-server")
 
 app = FastAPI(title="LiveKit Voice Agent Outbound API")
+
+# Global database instance
+db_instance: Optional[NeonDB] = None
+
+@app.on_event("startup")
+async def startup():
+    global db_instance
+    db_instance = await get_db()
+    logger.info("Database connection established")
+
+@app.on_event("shutdown")
+async def shutdown():
+    global db_instance
+    if db_instance:
+        await db_instance.close()
+        logger.info("Database connection closed")
 
 app.add_middleware(
     CORSMiddleware,
@@ -114,6 +131,32 @@ async def trigger_outbound_call(request: OutboundCallRequest, background_tasks: 
         "message": f"Calling {request.phone_number} with agent {request.agent_slug}",
         "data": request.model_dump()
     }
+
+@app.get("/dashboard/stats")
+async def get_dashboard_stats():
+    """Get dashboard statistics."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    try:
+        stats = await db_instance.get_call_stats(days=7)
+        return stats
+    except Exception as e:
+        logger.error(f"Error fetching stats: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/dashboard/calls")
+async def get_dashboard_calls(limit: int = 10):
+    """Get recent calls."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    try:
+        calls = await db_instance.get_recent_calls(limit=limit)
+        return calls
+    except Exception as e:
+        logger.error(f"Error fetching calls: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/health")
 async def health_check():

@@ -175,6 +175,34 @@ class NeonDB:
                 WHERE created_at > NOW() - INTERVAL '$1 days'
             """, days)
             return dict(stats) if stats else {}
+
+    async def get_recent_calls(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Fetch recent calls with contact details."""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT
+                    c.id,
+                    c.call_status,
+                    c.duration_seconds,
+                    c.created_at,
+                    c.interest_level,
+                    c.transcript,
+                    con.contact_name,
+                    con.phone_number,
+                    con.business_name
+                FROM calls c
+                LEFT JOIN contacts con ON c.contact_id = con.id
+                ORDER BY c.created_at DESC
+                LIMIT $1
+            """, limit)
+            # Convert rows to dicts and handle datetime serialization if needed (though API usually handles JSON)
+            result = []
+            for row in rows:
+                row_dict = dict(row)
+                if row_dict.get('created_at'):
+                    row_dict['created_at'] = row_dict['created_at'].isoformat()
+                result.append(row_dict)
+            return result
     
     async def get_webhooks(self, slug: str) -> List[Dict[str, Any]]:
         """Fetch active webhooks for the agent."""
