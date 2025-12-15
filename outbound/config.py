@@ -45,7 +45,7 @@ async def prepare_instructions(db: Any, agent_slug: str, schema_fields: Any) -> 
 
     IMPORTANT BEHAVIORAL INSTRUCTIONS:
     1. If you collect an email address, you MUST spell it back to the user character by character and ask them to confirm it is correct. Only save it after they confirm.
-    2. Once you have collected all the necessary information as per your objective, you MUST politely end the call yourself by using the `end_call` tool. Do not wait for the user to hang up.
+    2. Once you have collected all the necessary information as per your objective, you MUST politely end the call yourself by using the `end_call` tool immediately. Do not just say goodbye, you must invoke the tool.
     3. If you hear a voicemail message stating "The mailbox is full" or similar, immediately use the `end_call` tool to hang up.
     """
     agent_instructions += additional_instructions

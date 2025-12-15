@@ -29,19 +29,6 @@ from outbound.lifecycle import finalize_call as finalize_call_logic
 load_dotenv()
 logger = logging.getLogger("outbound-agent")
 
-async def hangup_call():
-    """End the call for all participants by deleting the room."""
-    ctx = get_job_context()
-    if ctx is None:
-        logger.warning("Not running in a job context, cannot hang up")
-        return
-
-    try:
-        await ctx.room.disconnect()
-        logger.info(f"Disconnected from room {ctx.room.name}")
-    except Exception as e:
-        logger.error(f"Failed to disconnect room: {e}")
-
 async def entrypoint(ctx: JobContext):
     """Main entry point for the outbound voice agent."""
 
@@ -100,8 +87,22 @@ async def entrypoint(ctx: JobContext):
 
     # We will define the finalize_call wrapper later when we have 'session' and 'call_start_time'.
 
+    async def hangup_call():
+        """End the call for all participants by deleting the room."""
+        try:
+            await ctx.room.disconnect()
+            logger.info(f"Disconnected from room {ctx.room.name}")
+        except Exception as e:
+            logger.error(f"Failed to disconnect room: {e}")
+
+        # Explicitly delete the room to ensure SIP call ends
+        try:
+            await ctx.api.room.delete_room(api.DeleteRoomRequest(room=ctx.room.name))
+            logger.info(f"Deleted room {ctx.room.name}")
+        except Exception as e:
+            logger.error(f"Failed to delete room: {e}")
+
     # Define tools
-    # Note: hangup_call is the global function defined above.
     all_tools = create_tools(
         call_metadata=call_metadata,
         db=db,
