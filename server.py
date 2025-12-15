@@ -3,6 +3,7 @@ import json
 import logging
 from typing import Optional
 from urllib.parse import urlparse
+from contextlib import asynccontextmanager
 import boto3
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,23 +21,27 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("outbound-server")
 
-app = FastAPI(title="LiveKit Voice Agent Outbound API")
-
 # Global database instance
 db_instance: Optional[NeonDB] = None
 
-@app.on_event("startup")
-async def startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     global db_instance
-    db_instance = await get_db()
-    logger.info("Database connection established")
+    try:
+        db_instance = await get_db()
+        logger.info("Database connection established")
+    except Exception as e:
+        logger.error(f"Failed to connect to database: {e}")
+        logger.warning("Server starting without database connection. Some endpoints may fail.")
+        db_instance = None
 
-@app.on_event("shutdown")
-async def shutdown():
-    global db_instance
+    yield
+
     if db_instance:
         await db_instance.close()
         logger.info("Database connection closed")
+
+app = FastAPI(title="LiveKit Voice Agent Outbound API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
