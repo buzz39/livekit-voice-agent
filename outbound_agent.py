@@ -18,24 +18,29 @@ from livekit.agents.llm import function_tool
 from livekit.plugins import deepgram, openai, silero
 from livekit import api
 from livekit.protocol.sip import CreateSIPParticipantRequest
+from livekit import rtc
 
-from mcp_integration import load_mcp_tools
+
+from egress_manager import EgressManager
+
 from neon_db import get_db
 from webhook_dispatcher import WebhookDispatcher
+
+from typing import Any
 
 load_dotenv()
 logger = logging.getLogger("outbound-agent")
 
-# Whispey Observability Integration
-try:
-    from whispey import LivekitObserve
-    WHISPEY_AVAILABLE = True
-except ImportError:
-    WHISPEY_AVAILABLE = False
-    logger.warning("Whispey not installed. Install with: pip install whispey")
+# Whispey Observability Integration (DISABLED)
+# try:
+#     from whispey import LivekitObserve
+#     WHISPEY_AVAILABLE = True
+# except ImportError:
+#     WHISPEY_AVAILABLE = False
+#     logger.warning("Whispey not installed. Install with: pip install whispey")
 
 # Check if Whispey is enabled via environment variable (default: False)
-WHISPEY_ENABLED = os.getenv("ENABLE_WHISPEY", "false").lower() in ("true", "1", "yes")
+WHISPEY_ENABLED = False # Force Disable
 
 
 async def hangup_call():
@@ -68,19 +73,19 @@ async def entrypoint(ctx: JobContext):
 
     # Initialize Whispey observability if enabled
     whispey = None
-    if WHISPEY_ENABLED and WHISPEY_AVAILABLE:
-        whispey_api_key = os.getenv("WHISPEY_API_KEY")
-        whispey_agent_id = os.getenv("WHISPEY_AGENT_ID", "outbound-agent")
-        if whispey_api_key:
-            try:
-                whispey = LivekitObserve(agent_id=whispey_agent_id, apikey=whispey_api_key)
-                logger.info(f"Whispey observability enabled for agent: {whispey_agent_id}")
-            except Exception as e:
-                logger.error(f"Failed to initialize Whispey: {e}")
-        else:
-            logger.warning("WHISPEY_API_KEY not set, observability disabled")
-    elif WHISPEY_ENABLED and not WHISPEY_AVAILABLE:
-        logger.warning("ENABLE_WHISPEY is set but Whispey package is not installed")
+    # if WHISPEY_ENABLED and WHISPEY_AVAILABLE:
+    #     whispey_api_key = os.getenv("WHISPEY_API_KEY")
+    #     whispey_agent_id = os.getenv("WHISPEY_AGENT_ID", "outbound-agent")
+    #     if whispey_api_key:
+    #         try:
+    #             whispey = LivekitObserve(agent_id=whispey_agent_id, apikey=whispey_api_key)
+    #             logger.info(f"Whispey observability enabled for agent: {whispey_agent_id}")
+    #         except Exception as e:
+    #             logger.error(f"Failed to initialize Whispey: {e}")
+    #     else:
+    #         logger.warning("WHISPEY_API_KEY not set, observability disabled")
+    # elif WHISPEY_ENABLED and not WHISPEY_AVAILABLE:
+    #     logger.warning("ENABLE_WHISPEY is set but Whispey package is not installed")
 
     # 2. Extract outbound metadata (robust)
     initial_metadata = {}
@@ -119,7 +124,7 @@ async def entrypoint(ctx: JobContext):
             pass
 
     # Extract fields safely
-    phone_number = initial_metadata.get("phone_number")
+    phone_number = initial_metadata.get("phone_number", "LOCAL_TEST_NUMBER")
     business_name = initial_metadata.get("business_name", "there")
     agent_slug = initial_metadata.get("agent_slug", "default_roofing_agent")
 
@@ -172,6 +177,99 @@ async def entrypoint(ctx: JobContext):
     contact_id = await db.upsert_contact(phone_number, business_name)
     prompt_id = await db.get_prompt_id(agent_slug)
 
+    # Initialize EgressManager early so it's available for tools
+    egress_manager = EgressManager(ctx.api)
+    recording_id = None # Play it safe, will be set later
+
+    # --- Robust Finalization Logic ---
+    is_finalized = False
+
+    async def finalize_call():
+        nonlocal is_finalized
+        if is_finalized:
+            return
+        is_finalized = True
+        
+        logger.info("⚡ Starting finalize_call...")
+        
+        # Calculate duration
+        call_end_time = datetime.datetime.now()
+        duration_seconds = int((call_end_time - call_start_time).total_seconds())
+
+        # Stop Egress immediately
+        if recording_id:
+            try:
+                await egress_manager.stop_egress(recording_id)
+                logger.info(f"Egress {recording_id} stop requested")
+            except Exception:
+                pass
+
+        # Capture transcript
+        transcript_text = None
+        try:
+            if getattr(session, "history", None):
+                transcript_lines = []
+                items = getattr(session.history, "items", None) or getattr(session.history, "messages", None) or []
+                for item in items:
+                    role = "Agent" if getattr(item, "role", None) == "assistant" else "User"
+                    text = getattr(item, "content", None) or getattr(item, "text", None) or ""
+                    if text:
+                        transcript_lines.append(f"{role}: {text}")
+                transcript_text = "\n".join(transcript_lines)
+                logger.info(f"Transcript captured ({len(transcript_lines)} lines)")
+        except Exception:
+            pass
+
+        # Persist to DB immediately
+        try:
+            email_flag = bool(call_metadata.get("email"))
+            await db.log_call(
+                contact_id=contact_id,
+                room_id=ctx.room.name,
+                prompt_id=prompt_id,
+                duration_seconds=duration_seconds,
+                call_status="completed",
+                transcript=transcript_text,
+                captured_data=call_metadata,
+                email_captured=email_flag,
+            )
+            await dispatcher.dispatch(
+                "call.completed",
+                {"room_id": ctx.room.name, "contact_id": contact_id, "duration_seconds": duration_seconds, "email_captured": email_flag},
+            )
+            logger.info("✅ Final call data persisted to DB")
+        except Exception as e:
+            logger.error(f"Failed to persist final call data: {e}")
+
+        # Try to get recording URL (with brief poll)
+        try:
+            for _ in range(3): # Try 3 times
+                resp = await ctx.api.recording.list_recordings(api.ListRecordingsRequest(room_name=ctx.room.name))
+                recordings = getattr(resp, "recordings", None) or getattr(resp, "content", None) or []
+                if recordings:
+                    first = recordings[0]
+                    rec_url = getattr(first, "url", None) or getattr(first, "download_url", None) or (first.get("url") if isinstance(first, dict) else None)
+                    if rec_url:
+                        await db.update_call_recording(ctx.room.name, rec_url)
+                        logger.info(f"Recording URL captured: {rec_url}")
+                        await dispatcher.dispatch("call.recording.ready", {"room_id": ctx.room.name, "recording_url": rec_url, "contact_id": contact_id})
+                        break
+                await asyncio.sleep(0.5)
+        except Exception:
+            pass
+            
+        # Cleanup
+        try:
+            await dispatcher.close()
+        except Exception:
+            pass
+        
+        try:
+            await db.close()
+            logger.info("DB Connection closed")
+        except Exception:
+            pass
+
     # AI Config
     ai_config = await db.get_ai_config("default_telephony_config")
     if not ai_config:
@@ -186,9 +284,6 @@ async def entrypoint(ctx: JobContext):
             "tts_model": "tts-1",
             "tts_voice": "alloy",
         }
-
-    # Load MCP Tools
-    mcp_tools = await load_mcp_tools(mcp_url=agent_config.get("mcp_endpoint_url"))
 
     # ---- Define function tools AFTER db/dispatcher/contact_id are available ----
     @function_tool
@@ -227,42 +322,17 @@ async def entrypoint(ctx: JobContext):
         logger.info(f"Note added: {note}")
         return ""
 
-    # IMPORTANT: end_call now logs call BEFORE issuing hangup to avoid losing call_metadata
+    # IMPORTANT: end_call now just hangs up. Cleanup is handled by event listeners.
     @function_tool
     async def end_call() -> str:
-        """End the call safely - persist call then hangup."""
-        logger.info("Agent requested end_call — persisting data before hangup")
-
-        # Persist call immediately (best-effort)
-        try:
-            email_flag = bool(call_metadata.get("email"))
-            # Attempt to write an entry (this will create a call record so you have captured data even if teardown crashes)
-            await db.log_call(
-                contact_id=contact_id,
-                room_id=ctx.room.name,
-                prompt_id=prompt_id,
-                duration_seconds=None,  # final duration will be updated later if needed
-                call_status="ending",
-                transcript=None,
-                captured_data=call_metadata,
-                email_captured=email_flag,
-            )
-            await dispatcher.dispatch(
-                "call.ending", {"room_id": ctx.room.name, "contact_id": contact_id, "email_captured": email_flag}
-            )
-            logger.info("Early call log persisted before hangup")
-        except Exception as e:
-            logger.exception(f"Failed early log_call in end_call: {e}")
-
-        # Now attempt hangup
-        try:
-            await hangup_call()
-        except Exception as e:
-            logger.error(f"hangup_call during end_call failed: {e}")
-
+        """End the call safely and immediately."""
+        logger.info("Agent requested end_call")
+        # Immediate hangup to prevent dead air. 
+        # The 'disconnected' event will trigger finalize_call() for data persistence.
+        asyncio.create_task(hangup_call()) 
         return ""
 
-    all_tools = [get_current_time, update_call_data, add_note, end_call] + mcp_tools
+    all_tools = [get_current_time, update_call_data, add_note, end_call]
 
     # 4. Initialize Agent Components
     agent = Agent(instructions=agent_instructions, tools=all_tools)
@@ -280,27 +350,75 @@ async def entrypoint(ctx: JobContext):
     session = AgentSession(vad=silero.VAD.load(), stt=stt, llm=llm, tts=tts)
 
     # Start Whispey session tracking with metadata
-    session_id = None
-    if whispey:
-        try:
-            session_id = whispey.start_session(session, room=ctx.room, phone_number=phone_number, customer_name=business_name)
-            logger.info(f"Whispey session started: {session_id}")
-        except Exception as e:
-            logger.error(f"Failed to start Whispey session: {e}")
+    # session_id = None
+    # if whispey:
+    #     try:
+    #         session_id = whispey.start_session(session, room=ctx.room, phone_number=phone_number, customer_name=business_name)
+    #         logger.info(f"Whispey session started: {session_id}")
+    #     except Exception as e:
+    #         logger.error(f"Failed to start Whispey session: {e}")
 
-    # Register Whispey shutdown callback
-    if whispey and session_id:
-        async def whispey_shutdown():
-            try:
-                await whispey.export(session_id)
-                logger.info(f"Whispey data exported for session: {session_id}")
-            except Exception as e:
-                logger.error(f"Failed to export Whispey data: {e}")
-
-        ctx.add_shutdown_callback(whispey_shutdown)
+    # # Register Whispey shutdown callback
+    # if whispey and session_id:
+    #     async def whispey_shutdown():
+    #         try:
+    #             await whispey.export(session_id)
+    #             logger.info(f"Whispey data exported for session: {session_id}")
+    #         except Exception as e:
+    #             logger.error(f"Failed to export Whispey data: {e}")
+    #
+    #     ctx.add_shutdown_callback(whispey_shutdown)
 
     # 5. Start Session ASYNCHRONOUSLY (Critical for latency)
     session_start_task = asyncio.create_task(session.start(agent=agent, room=ctx.room))
+
+
+    # ===================== RECORDING: START ROOM COMPOSITE EGRESS =====================
+    
+    egress_manager = EgressManager(ctx.api)
+    
+    # Configure S3 if env vars are present
+    s3_options = None
+    if os.getenv("S3_ACCESS_KEY") and os.getenv("S3_SECRET_KEY") and os.getenv("S3_BUCKET"):
+        s3_options = {
+            "access_key": os.getenv("S3_ACCESS_KEY"),
+            "secret": os.getenv("S3_SECRET_KEY"),
+            "bucket": os.getenv("S3_BUCKET"),
+            "region": os.getenv("S3_REGION", "")
+        }
+    elif os.getenv("AWS_ACCESS_KEY") and os.getenv("AWS_SECRET_ACCESS_KEY") and os.getenv("S3_BUCKET_NAME"):
+         s3_options = {
+            "access_key": os.getenv("AWS_ACCESS_KEY"),
+            "secret": os.getenv("AWS_SECRET_ACCESS_KEY"),
+            "bucket": os.getenv("S3_BUCKET_NAME"),
+            "region": os.getenv("AWS_REGION", "")
+        }
+        
+    # START EGRESS IN BACKGROUND to avoid blocking the greeting
+    # We assign the recording_id later in the callback or just trust the mananger logs
+    async def start_recording_bg():
+        rec_id = await egress_manager.start_room_composite_egress(
+            ctx.room.name, 
+            s3_options=s3_options
+        )
+        if rec_id:
+            call_metadata["recording_id"] = rec_id
+            try:
+                await dispatcher.dispatch("recording.started", {
+                    "room_id": ctx.room.name,
+                    "recording_id": rec_id,
+                    "contact_id": contact_id,
+                    "phone_number": phone_number,
+                })
+            except Exception as e:
+                logger.debug(f"recording.started webhook error: {e}")
+
+    asyncio.create_task(start_recording_bg()) # <--- Non-blocking!
+
+    # ===================== END RECORDING CODE =====================
+
+
+
 
     # 6. Dial the user (SIP)
     sip_trunk_id = os.getenv("SIP_TRUNK_ID")
@@ -310,38 +428,63 @@ async def entrypoint(ctx: JobContext):
         logger.error("SIP_TRUNK_ID not set in env")
         return
 
-    # Sanitize participant_identity to avoid Rust parsing errors (remove non-digit chars)
-    clean_identity = re.sub(r"\D", "", phone_number)
+    # Sanitize participant_identity. If it's a SIP URI, keep it as is.
+    if "sip:" in phone_number:
+        clean_identity = phone_number
+    else:
+        # remove non-digit chars for standard phone numbers
+        clean_identity = re.sub(r"\D", "", phone_number)
 
-    logger.info(f"Dialing {phone_number} (identity={clean_identity})...")
+    # Logic for target and identity
+    actual_sip_target = phone_number
+    final_identity = phone_number
+
+    if "sip:" in phone_number:
+        # SIP URI Case
+        # Target: User part only (e.g. "hello" from "sip:hello@domain")
+        clean = phone_number.replace("sip:", "")
+        if "@" in clean:
+            actual_sip_target = clean.split("@")[0]
+        else:
+            actual_sip_target = clean
+        # Identity: Full URI (safe for strings)
+        final_identity = phone_number
+    else:
+        # Phone Number Case
+        # Target: Raw intput (or you could clean it, but we keep original behavior)
+        actual_sip_target = phone_number
+        # Identity: Digits only (Crucial for LiveKit backend compatibility)
+        final_identity = re.sub(r"\D", "", phone_number)
+
+    logger.info(f"Dialing {actual_sip_target} (identity={final_identity})...")
     try:
         await ctx.api.sip.create_sip_participant(
             CreateSIPParticipantRequest(
                 room_name=ctx.room.name,
                 sip_trunk_id=sip_trunk_id,
-                sip_call_to=phone_number,
+                sip_call_to=actual_sip_target,
                 sip_number=sip_from_number,
-                participant_identity=clean_identity,
+                participant_identity=final_identity,
                 participant_name=business_name,
-                wait_until_answered=True,  # Wait here so we know they picked up
+                wait_until_answered=True, 
             )
         )
         logger.info("Call answered!")
     except Exception as e:
         logger.error(f"Failed to dial: {e}")
+        # Add a small delay to allow potential extensive cleanup or event processing 
+        # to settle before ensuring the agent doesn't crash on race conditions
+        await asyncio.sleep(1) 
         try:
             await dispatcher.dispatch("call.failed", {"error": str(e)})
         except Exception:
             pass
         return
 
-    # 7. Wait for session to be fully started (should be quick now)
-    await session_start_task
-
     # 8. Fire Opener using session.say() for immediate audio output
+    # This was previously potentially blocked or awaited incorrectly.
     opening_line = agent_config.get("opening_line") or "Hello? Am I speaking with the business owner?"
 
-    # Dynamic Business Name Injection
     if business_name:
         if "{business_name}" in opening_line:
             opening_line = opening_line.format(business_name=business_name)
@@ -349,28 +492,39 @@ async def entrypoint(ctx: JobContext):
             opening_line = opening_line.replace("Am I speaking with the owner?", f"Am I speaking with the owner of {business_name}?")
 
     logger.info(f"Final Opening Line: '{opening_line}'")
+    
+    # Ensure session is started before speaking
+    await session_start_task
+    
     try:
         await session.say(opening_line, allow_interruptions=True)
     except Exception as e:
         logger.warning(f"Failed to play opening line: {e}")
 
-    # 9. Wait for disconnect
-    call_start_time = datetime.datetime.now()
-    try:
-        # Wait for room disconnect - this is the proper way to wait for call to end
-        await ctx.room.wait_for_disconnect()
-    except AttributeError:
-        # Fallback for newer versions that don't have wait_for_disconnect
-        try:
-            await session.aclose()
-        except:
-            pass
-    finally:
-        # Calculate call duration
+    # 9. Handle Disconnect & Cleanup Robustly
+    is_finalized = False
+
+    async def finalize_call():
+        nonlocal is_finalized
+        if is_finalized:
+            return
+        is_finalized = True
+        
+        logger.info("⚡ Starting finalize_call (race against potential crash)...")
+        
+        # Calculate duration
         call_end_time = datetime.datetime.now()
         duration_seconds = int((call_end_time - call_start_time).total_seconds())
 
-        # Capture transcript from session history
+        # Stop Egress immediately
+        if recording_id:
+            try:
+                await egress_manager.stop_egress(recording_id)
+                logger.info("Egress stop requested")
+            except Exception:
+                pass
+
+        # Capture transcript
         transcript_text = None
         try:
             if getattr(session, "history", None):
@@ -382,31 +536,13 @@ async def entrypoint(ctx: JobContext):
                     if text:
                         transcript_lines.append(f"{role}: {text}")
                 transcript_text = "\n".join(transcript_lines)
-        except Exception as e:
-            logger.error(f"Failed to capture transcript: {e}")
+                logger.info(f"Transcript captured ({len(transcript_lines)} lines)")
+        except Exception:
+            pass
 
-        # Fetch recordings from LiveKit (if any) and try to persist
-        recording_url = None
+        # Persist to DB immediately
         try:
-            resp = await ctx.api.recording.list_recordings(api.ListRecordingsRequest(room_name=ctx.room.name))
-            recordings = getattr(resp, "recordings", None) or getattr(resp, "content", None) or []
-            if recordings:
-                first = recordings[0]
-                recording_url = getattr(first, "url", None) or getattr(first, "download_url", None) or (first.get("url") if isinstance(first, dict) else None)
-                if recording_url:
-                    try:
-                        await db.update_call_recording(ctx.room.name, recording_url)
-                        await dispatcher.dispatch("call.recording.ready", {"room_id": ctx.room.name, "recording_url": recording_url, "contact_id": contact_id})
-                    except Exception as e:
-                        logger.debug(f"Failed to persist/dispatch recording url: {e}")
-        except Exception as e:
-            logger.debug(f"Failed to fetch recordings: {e}")
-
-        # Final attempt to persist the call (robust)
-        try:
-            email_value = call_metadata.get("email")
-            email_flag = bool(email_value)
-            # Update the final call row (duration, transcript, call_status). Note: if an early record exists (from end_call), this inserts a new row; you may want to update instead depending on schema.
+            email_flag = bool(call_metadata.get("email"))
             await db.log_call(
                 contact_id=contact_id,
                 room_id=ctx.room.name,
@@ -421,25 +557,63 @@ async def entrypoint(ctx: JobContext):
                 "call.completed",
                 {"room_id": ctx.room.name, "contact_id": contact_id, "duration_seconds": duration_seconds, "email_captured": email_flag},
             )
-            logger.info(f"Call logged successfully. Duration: {duration_seconds}s")
+            logger.info("✅ Final call data persisted to DB")
         except Exception as e:
-            logger.exception(f"Failed to log call in finalizer: {e}")
+            logger.error(f"Failed to persist final call data: {e}")
 
-        # Clean up
+        # Try to get recording URL (best effort, no sleep)
+        try:
+            resp = await ctx.api.recording.list_recordings(api.ListRecordingsRequest(room_name=ctx.room.name))
+            recordings = getattr(resp, "recordings", None) or getattr(resp, "content", None) or []
+            if recordings:
+                first = recordings[0]
+                rec_url = getattr(first, "url", None) or getattr(first, "download_url", None) or (first.get("url") if isinstance(first, dict) else None)
+                if rec_url:
+                    await db.update_call_recording(ctx.room.name, rec_url)
+                    logger.info("Recording URL updated")
+        except Exception:
+            pass
+            
+        # Cleanup
         try:
             await dispatcher.close()
         except Exception:
             pass
 
-        try:
-            await session.aclose()
-        except Exception:
-            pass
+    # Create a shutdown event to keep the process alive
+    shutdown_event = asyncio.Event()
 
-        try:
-            await db.close()
-        except Exception:
-            pass
+    # Listen for disconnect explicitly to run finalize BEFORE the main wait finishes/crashes
+    @ctx.room.on("participant_disconnected")
+    def on_participant_disconnected(participant: rtc.RemoteParticipant):
+        logger.info(f"Participant {participant.identity} disconnected - triggering finalize")
+        asyncio.create_task(finalize_call())
+
+    @ctx.room.on("disconnected")
+    def on_room_disconnected():
+        logger.info("Room disconnected - triggering finalize")
+        asyncio.create_task(finalize_call())
+
+    # Ensure finalize_call sets the event to unblock the main loop
+    original_finalize = finalize_call
+    async def finalize_wrapper():
+        await original_finalize()
+        if not shutdown_event.is_set():
+            shutdown_event.set()
+    
+    finalize_call = finalize_wrapper
+
+    call_start_time = datetime.datetime.now()
+    
+    # Wait until we explicitly decide to shut down (via end_call or disconnect events)
+    # This prevents premature exit if wait_for_disconnect() is flaky
+    await shutdown_event.wait()
+    
+    # Final cleanup
+    try:
+        await session.aclose()
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
