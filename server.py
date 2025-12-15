@@ -2,6 +2,8 @@ import os
 import json
 import logging
 from typing import Optional
+from urllib.parse import urlparse
+import boto3
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -145,6 +147,63 @@ async def get_dashboard_stats():
         logger.error(f"Error fetching stats: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+def generate_presigned_url(recording_url: str, expiration=3600) -> Optional[str]:
+    """
+    Generates a presigned URL for an S3 object.
+    """
+    if not recording_url:
+        return None
+
+    # Check if we have S3 credentials
+    access_key = os.getenv("S3_ACCESS_KEY") or os.getenv("AWS_ACCESS_KEY")
+    secret_key = os.getenv("S3_SECRET_KEY") or os.getenv("AWS_SECRET_ACCESS_KEY")
+    endpoint_url = os.getenv("S3_ENDPOINT")
+    region_name = os.getenv("S3_REGION") or os.getenv("AWS_REGION")
+    bucket_name = os.getenv("S3_BUCKET") or os.getenv("S3_BUCKET_NAME")
+
+    if not (access_key and secret_key and bucket_name):
+        return recording_url # Return original if no credentials
+
+    try:
+        s3_client = boto3.client(
+            's3',
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            endpoint_url=endpoint_url,
+            region_name=region_name,
+        )
+
+        key = None
+        # Strategy 1: standard path style (endpoint/bucket/key)
+        path_style_prefix = f"/{bucket_name}/"
+        if path_style_prefix in recording_url:
+            key = recording_url.split(path_style_prefix, 1)[1]
+
+        # Strategy 2: virtual hosted style (bucket.s3.../key) or just parsing path if we trust the URL structure
+        if not key:
+            parsed = urlparse(recording_url)
+            # If path starts with /bucket_name/, we already caught it in strategy 1 (usually).
+            # If host contains bucket name (virtual hosted), path is the key.
+            if bucket_name in parsed.netloc:
+                 key = parsed.path.lstrip("/")
+            # If we simply can't find it, we might just assume it's the filename if it looks like one
+            elif recording_url.endswith(".mp4"):
+                 key = recording_url.split("/")[-1]
+
+        if not key:
+            return recording_url
+
+        response = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': bucket_name, 'Key': key},
+            ExpiresIn=expiration
+        )
+        return response
+
+    except Exception as e:
+        logger.error(f"Error generating presigned URL: {e}")
+        return recording_url
+
 @app.get("/dashboard/calls")
 async def get_dashboard_calls(limit: int = 10):
     """Get recent calls."""
@@ -153,6 +212,10 @@ async def get_dashboard_calls(limit: int = 10):
 
     try:
         calls = await db_instance.get_recent_calls(limit=limit)
+        # Sign recording URLs
+        for call in calls:
+            if call.get("recording_url"):
+                call["recording_url"] = generate_presigned_url(call["recording_url"])
         return calls
     except Exception as e:
         logger.error(f"Error fetching calls: {e}")
