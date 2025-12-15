@@ -16,7 +16,7 @@ async def start_recording(
 ):
     """
     Starts the room composite egress (recording) in the background.
-    Updates call_metadata with the recording_id.
+    Updates call_metadata with the recording_id and recording_url.
     """
     # Configure S3 if env vars are present
     s3_options = None
@@ -25,29 +25,34 @@ async def start_recording(
             "access_key": os.getenv("S3_ACCESS_KEY"),
             "secret": os.getenv("S3_SECRET_KEY"),
             "bucket": os.getenv("S3_BUCKET"),
-            "region": os.getenv("S3_REGION", "")
+            "region": os.getenv("S3_REGION", ""),
+            "endpoint": os.getenv("S3_ENDPOINT", "")
         }
     elif os.getenv("AWS_ACCESS_KEY") and os.getenv("AWS_SECRET_ACCESS_KEY") and os.getenv("S3_BUCKET_NAME"):
          s3_options = {
             "access_key": os.getenv("AWS_ACCESS_KEY"),
             "secret": os.getenv("AWS_SECRET_ACCESS_KEY"),
             "bucket": os.getenv("S3_BUCKET_NAME"),
-            "region": os.getenv("AWS_REGION", "")
+            "region": os.getenv("AWS_REGION", ""),
+            "endpoint": os.getenv("S3_ENDPOINT", "")
         }
 
     # START EGRESS IN BACKGROUND to avoid blocking the greeting
     # We assign the recording_id later in the callback or just trust the mananger logs
     async def _start_recording_bg():
-        rec_id = await egress_manager.start_room_composite_egress(
+        rec_id, rec_url = await egress_manager.start_room_composite_egress(
             ctx.room.name,
             s3_options=s3_options
         )
         if rec_id:
             call_metadata["recording_id"] = rec_id
+            if rec_url:
+                call_metadata["recording_url"] = rec_url
             try:
                 await dispatcher.dispatch("recording.started", {
                     "room_id": ctx.room.name,
                     "recording_id": rec_id,
+                    "recording_url": rec_url,
                     "contact_id": contact_id,
                     "phone_number": phone_number,
                 })
