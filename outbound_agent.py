@@ -228,6 +228,8 @@ async def entrypoint(ctx: JobContext):
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
+    # Set default load threshold to 0.9 to avoid flapping in dev/high-load envs
+    os.environ.setdefault("LIVEKIT_WORKER_LOAD_THRESHOLD", "0.9")
     cli.run_app(
         WorkerOptions(
             entrypoint_fnc=entrypoint,
