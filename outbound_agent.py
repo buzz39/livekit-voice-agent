@@ -267,9 +267,13 @@ async def entrypoint(ctx: JobContext):
     # Ensure finalize_call sets the event to unblock the main loop
     original_finalize = finalize_call
     async def finalize_wrapper():
-        await original_finalize()
-        if not shutdown_event.is_set():
-            shutdown_event.set()
+        try:
+            await original_finalize()
+        except Exception as e:
+            logger.error(f"Error in finalize_call: {e}")
+        finally:
+            if not shutdown_event.is_set():
+                shutdown_event.set()
     
     finalize_call = finalize_wrapper
     

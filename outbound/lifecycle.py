@@ -34,6 +34,7 @@ async def finalize_call(
 
     # Stop Egress immediately
     if recording_id:
+        logger.info(f"Stopping Egress {recording_id}")
         try:
             await egress_manager.stop_egress(recording_id)
             logger.info(f"Egress {recording_id} stop requested")
