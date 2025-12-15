@@ -122,10 +122,17 @@ async def entrypoint(ctx: JobContext):
     whispey = None
     if WHISPEY_ENABLED:
         whispey_api_key = os.getenv("WHISPEY_API_KEY")
-        whispey_agent_id = os.getenv("WHISPEY_AGENT_ID", "inbound-agent")
+        whispey_agent_id = os.getenv("WHISPEY_INBOUND_AGENT_ID", os.getenv("WHISPEY_AGENT_ID", "inbound-agent"))
+        whispey_base_url = os.getenv("WHISPEY_BASE_URL")  # Optional self-hosted URL
+
         if whispey_api_key:
             try:
-                whispey = LivekitObserve(agent_id=whispey_agent_id, apikey=whispey_api_key)
+                # Add base_url if present
+                if whispey_base_url:
+                    whispey = LivekitObserve(agent_id=whispey_agent_id, apikey=whispey_api_key, base_url=whispey_base_url)
+                else:
+                    whispey = LivekitObserve(agent_id=whispey_agent_id, apikey=whispey_api_key)
+
                 logger.info(f"Whispey observability enabled for agent: {whispey_agent_id}")
             except Exception as e:
                 logger.error(f"Failed to initialize Whispey: {e}")

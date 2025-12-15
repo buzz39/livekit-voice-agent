@@ -115,10 +115,10 @@ WHISPEY_OUTBOUND_AGENT_ID=roofing-outbound
 Then modify the agents to use specific IDs:
 ```python
 # In inbound_agent.py
-whispey_agent_id = os.getenv("WHISPEY_INBOUND_AGENT_ID", "inbound-agent")
+whispey_agent_id = os.getenv("WHISPEY_INBOUND_AGENT_ID", os.getenv("WHISPEY_AGENT_ID", "inbound-agent"))
 
 # In outbound_agent.py
-whispey_agent_id = os.getenv("WHISPEY_OUTBOUND_AGENT_ID", "outbound-agent")
+whispey_agent_id = os.getenv("WHISPEY_OUTBOUND_AGENT_ID", os.getenv("WHISPEY_AGENT_ID", "outbound-agent"))
 ```
 
 ## Troubleshooting
@@ -153,6 +153,11 @@ whispey = LivekitObserve(
     apikey=whispey_api_key,
     base_url="https://your-whispey-instance.com"  # Add this
 )
+```
+
+Alternatively, set `WHISPEY_BASE_URL` in your `.env` file to support self-hosted instances without code changes:
+```bash
+WHISPEY_BASE_URL=https://your-whispey-instance.com
 ```
 
 ## Benefits vs Building Custom
