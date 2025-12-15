@@ -187,6 +187,7 @@ class NeonDB:
                     c.created_at,
                     c.interest_level,
                     c.transcript,
+                    c.recording_url,
                     con.contact_name,
                     con.phone_number,
                     con.business_name
