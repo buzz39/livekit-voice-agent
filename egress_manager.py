@@ -1,6 +1,6 @@
 import logging
 import asyncio
-from typing import Optional
+from typing import Optional, Tuple
 from livekit import api
 from livekit.protocol.egress import RoomCompositeEgressRequest, EncodedFileOutput, S3Upload
 
@@ -20,7 +20,7 @@ class EgressManager:
         layout: str = "speaker-light", 
         file_output_filepath: Optional[str] = None,
         s3_options: Optional[dict] = None
-    ) -> Optional[str]:
+    ) -> Tuple[Optional[str], Optional[str]]:
         """
         Starts a composite egress recording for the specified room.
         
@@ -31,7 +31,9 @@ class EgressManager:
             s3_options: Optional dictionary containing S3 credentials (access_key, secret, bucket, region, endpoint).
             
         Returns:
-            The egress_id if successful, None otherwise.
+            A tuple containing (egress_id, recording_url).
+            egress_id is None if failed.
+            recording_url is None if not constructible or failed.
         """
         try:
             file_output = EncodedFileOutput()
@@ -52,7 +54,7 @@ class EgressManager:
                 valid_s3 = True
             else:
                 logger.warning("S3 credentials not provided. Skipping egress recording to avoid failures.")
-                return None
+                return None, None
             
             # Always ensure a filepath (key) is set. 
             # If S3 is valid, this acts as the object key.
@@ -64,6 +66,26 @@ class EgressManager:
             else:
                  file_output.filepath = file_output_filepath
 
+            # Construct URL if S3 options are present
+            recording_url = None
+            if valid_s3:
+                bucket = s3_options.get("bucket")
+                endpoint = s3_options.get("endpoint")
+                region = s3_options.get("region")
+                key = file_output.filepath
+
+                if endpoint:
+                     # Clean up endpoint
+                     if not endpoint.startswith("http"):
+                         endpoint = f"https://{endpoint}"
+                     recording_url = f"{endpoint.rstrip('/')}/{bucket}/{key}"
+                else:
+                     # AWS S3 standard
+                     if region:
+                        recording_url = f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
+                     else:
+                        recording_url = f"https://{bucket}.s3.amazonaws.com/{key}"
+
             # Using 'file' (singular) as it is the standard oneof field for EncodedFileOutput.
             request = RoomCompositeEgressRequest(
                 room_name=room_name,
@@ -73,12 +95,12 @@ class EgressManager:
             
             response = await self.api.egress.start_room_composite_egress(request)
             egress_id = response.egress_id
-            logger.info(f"🎥 Recording started. Egress ID: {egress_id}")
-            return egress_id
+            logger.info(f"🎥 Recording started. Egress ID: {egress_id}, URL: {recording_url}")
+            return egress_id, recording_url
             
         except Exception as e:
             logger.error(f"❌ Failed to start recording: {e}")
-            return None
+            return None, None
 
     async def stop_egress(self, egress_id: str):
         """

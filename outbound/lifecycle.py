@@ -91,26 +91,39 @@ async def finalize_call(
     except Exception as e:
         logger.error(f"Failed to persist final call data: {e}")
 
-    # Try to get recording URL (with brief poll)
-    try:
-        # We try a few times to get the recording URL
-        # NOTE: In the original code there were two versions of this logic.
-        # One with a loop and sleep (asyncio.sleep(0.5)), and one without sleep.
-        # Since this is running in background/async, a small wait loop is acceptable.
-        for _ in range(3):
-            resp = await ctx.api.recording.list_recordings(api.ListRecordingsRequest(room_name=ctx.room.name))
-            recordings = getattr(resp, "recordings", None) or getattr(resp, "content", None) or []
-            if recordings:
-                first = recordings[0]
-                rec_url = getattr(first, "url", None) or getattr(first, "download_url", None) or (first.get("url") if isinstance(first, dict) else None)
-                if rec_url:
-                    await db.update_call_recording(ctx.room.name, rec_url)
-                    logger.info(f"Recording URL captured: {rec_url}")
-                    await dispatcher.dispatch("call.recording.ready", {"room_id": ctx.room.name, "recording_url": rec_url, "contact_id": contact_id})
-                    break
-            await asyncio.sleep(0.5)
-    except Exception:
-        pass
+    # Try to get recording URL.
+    # Priority:
+    # 1. URL constructed by EgressManager (stored in metadata)
+    # 2. LiveKit API list_recordings (fallback)
+
+    rec_url = call_metadata.get("recording_url")
+
+    if rec_url:
+        logger.info(f"Using constructed recording URL: {rec_url}")
+        try:
+            await db.update_call_recording(ctx.room.name, rec_url)
+            await dispatcher.dispatch("call.recording.ready", {"room_id": ctx.room.name, "recording_url": rec_url, "contact_id": contact_id})
+        except Exception as e:
+            logger.error(f"Failed to update recording URL from metadata: {e}")
+            rec_url = None # Fallback to polling if DB update fails or something else is wrong
+
+    if not rec_url:
+        try:
+            # We try a few times to get the recording URL via API if not available
+            for _ in range(3):
+                resp = await ctx.api.recording.list_recordings(api.ListRecordingsRequest(room_name=ctx.room.name))
+                recordings = getattr(resp, "recordings", None) or getattr(resp, "content", None) or []
+                if recordings:
+                    first = recordings[0]
+                    fetched_url = getattr(first, "url", None) or getattr(first, "download_url", None) or (first.get("url") if isinstance(first, dict) else None)
+                    if fetched_url:
+                        await db.update_call_recording(ctx.room.name, fetched_url)
+                        logger.info(f"Recording URL captured via API: {fetched_url}")
+                        await dispatcher.dispatch("call.recording.ready", {"room_id": ctx.room.name, "recording_url": fetched_url, "contact_id": contact_id})
+                        break
+                await asyncio.sleep(0.5)
+        except Exception:
+            pass
 
     # Cleanup
     try:
