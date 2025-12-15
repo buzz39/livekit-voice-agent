@@ -10,7 +10,7 @@ Handles:
 import os
 import logging
 import json
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 import asyncpg
 from datetime import datetime
 
@@ -75,6 +75,20 @@ class NeonDB:
                 RETURNING id
             """, phone_number, business_name, contact_name, email, interest_level)
             return row["id"]
+
+    async def update_contact_email(self, contact_id: Union[int, str], email: str):
+        """Update contact email."""
+        # Ensure contact_id is an integer if possible, though asyncpg handles types well if they match the DB.
+        # contacts.id is SERIAL (integer).
+        if isinstance(contact_id, str) and contact_id.isdigit():
+            contact_id = int(contact_id)
+
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE contacts
+                SET email = $2, updated_at = NOW()
+                WHERE id = $1
+            """, contact_id, email)
     
     async def get_data_schema(self, slug: str = "default_roofing_agent") -> List[Dict[str, Any]]:
         """Fetch data schema for the agent."""
@@ -116,6 +130,15 @@ class NeonDB:
                 interest_level, objection, notes, email_captured, call_status, transcript, json_data)
             return row["id"]
     
+    async def update_call_recording(self, room_id: str, recording_url: str):
+        """Update the recording URL for a call."""
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE calls
+                SET recording_url = $2
+                WHERE room_id = $1
+            """, room_id, recording_url)
+
     async def get_prompt_id(self, name: str = "default_roofing_agent") -> Optional[int]:
         """Get prompt ID by name."""
         async with self.pool.acquire() as conn:
