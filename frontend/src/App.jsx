@@ -11,6 +11,7 @@ function App() {
   const [logs, setLogs] = useState([]);
   const [stats, setStats] = useState(null);
   const [recentCalls, setRecentCalls] = useState([]);
+  const [riskLevel, setRiskLevel] = useState('low');
 
   // Fetch stats and recent calls on mount
   useEffect(() => {
@@ -27,6 +28,55 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Poll for active call updates
+  useEffect(() => {
+    if (callStatus === 'active' || callStatus === 'connecting') {
+        // If we don't have a call ID yet, we might need one.
+        // For this demo, let's assume we are watching the *latest* call if we just started one.
+        // In a real app, startOutboundCall should return the call ID.
+        // Since startOutboundCall returns { data: request.model_dump() }, it doesn't give ID immediately because it's queued.
+        // But for the purpose of "Make it work with DB", let's assume we poll the *latest* call from DB
+        // and check if it's 'in-progress' or 'queued'.
+
+        const pollCall = async () => {
+             const calls = await getRecentCalls(1);
+             if (calls && calls.length > 0) {
+                 const latestCall = calls[0];
+                 // Update logs if we have a transcript
+                 if (latestCall.transcript) {
+                     try {
+                         const transcript = typeof latestCall.transcript === 'string'
+                            ? JSON.parse(latestCall.transcript)
+                            : latestCall.transcript;
+
+                         // Map transcript to logs format
+                         const newLogs = transcript.map(entry => ({
+                             role: entry.role,
+                             text: entry.text,
+                             timestamp: new Date().toLocaleTimeString([], { hour12: false }) // Or use entry timestamp if available
+                         }));
+                         setLogs(newLogs);
+                     } catch (e) {
+                         console.error("Error parsing transcript", e);
+                     }
+                 }
+
+                 if (latestCall.interest_level) {
+                     // Map interest level to risk? Or use objection?
+                     // Vaani maps risk. Let's map interest level for now.
+                     // Hot -> Low Risk, Warm -> Medium, Cold -> High? Or vice versa depending on context (Debt collection: Hot = PTP = Low Risk)
+                     if (latestCall.interest_level === 'Hot') setRiskLevel('low');
+                     else if (latestCall.interest_level === 'Warm') setRiskLevel('medium');
+                     else setRiskLevel('high');
+                 }
+             }
+        };
+
+        const interval = setInterval(pollCall, 2000);
+        return () => clearInterval(interval);
+    }
+  }, [callStatus]);
+
   const handleStartCall = async (number) => {
     setCallStatus('connecting');
     setLogs([{
@@ -37,7 +87,9 @@ function App() {
 
     try {
       await startOutboundCall(number);
-      setCallStatus('active'); // In a real app, we'd wait for a socket event saying 'connected'
+      // Wait a bit then switch to active
+      setTimeout(() => setCallStatus('active'), 2000);
+
       setLogs(prev => [...prev, {
         role: 'system',
         text: `Call queued successfully.`,
@@ -60,7 +112,9 @@ function App() {
       text: 'Call ended.',
       timestamp: new Date().toLocaleTimeString([], { hour12: false })
     }]);
-    // Optionally trigger a stats refresh
+    // Refresh stats immediately
+    getRecentCalls().then(setRecentCalls);
+    getStats().then(setStats);
   };
 
   // Helper to format duration
@@ -96,7 +150,7 @@ function App() {
           />
           <div className="bg-slate-900 border border-slate-800 rounded-lg p-5 flex flex-col justify-center items-center h-full">
             <div className="text-slate-400 text-sm font-medium uppercase tracking-wider mb-2">Current Risk Level</div>
-            <RiskBadge level="low" />
+            <RiskBadge level={riskLevel} />
           </div>
         </div>
 

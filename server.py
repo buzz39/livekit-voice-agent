@@ -226,6 +226,37 @@ async def get_dashboard_calls(limit: int = 10):
         logger.error(f"Error fetching calls: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+@app.get("/dashboard/call/{call_id}")
+async def get_call_details(call_id: int):
+    """Get details for a specific call, including transcript."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    # Since get_recent_calls returns a list, and we don't have get_call_by_id yet,
+    # we can re-use get_recent_calls filtered or implement a new method.
+    # For now, let's implement a simple fetch from DB directly if possible or add method to NeonDB
+    # But since I can't modify NeonDB interface easily without touching both implementations,
+    # I'll rely on a new method I should add to NeonDB/SQLiteDB.
+
+    # Wait, I already added methods to NeonDB class in the previous step?
+    # No, I only added `get_recent_calls`.
+    # Let's add a `get_call` method to the DB classes.
+
+    try:
+        call = await db_instance.get_call(call_id)
+        if not call:
+             raise HTTPException(status_code=404, detail="Call not found")
+
+        if call.get("recording_url"):
+            call["recording_url"] = generate_presigned_url(call["recording_url"])
+
+        return call
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching call {call_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}

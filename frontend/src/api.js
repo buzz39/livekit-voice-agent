@@ -28,6 +28,19 @@ export async function getRecentCalls(limit = 10) {
   }
 }
 
+export async function getCallDetails(callId) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/dashboard/call/${callId}`);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return await response.json();
+  } catch (error) {
+    console.error(`Failed to fetch call details for ${callId}:`, error);
+    return null;
+  }
+}
+
 export async function startOutboundCall(phoneNumber, businessName = "Default Business") {
   try {
     const response = await fetch(`${API_BASE_URL}/outbound-call`, {
