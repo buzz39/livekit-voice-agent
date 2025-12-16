@@ -167,6 +167,7 @@ def generate_presigned_url(recording_url: str, expiration=3600) -> Optional[str]
     bucket_name = os.getenv("S3_BUCKET") or os.getenv("S3_BUCKET_NAME")
 
     if not (access_key and secret_key and bucket_name):
+        logger.warning(f"Missing S3 credentials. Access Key: {bool(access_key)}, Secret: {bool(secret_key)}, Bucket: {bool(bucket_name)}. Returning original URL.")
         return recording_url # Return original if no credentials
 
     try:
@@ -179,23 +180,24 @@ def generate_presigned_url(recording_url: str, expiration=3600) -> Optional[str]
         )
 
         key = None
+        parsed = urlparse(recording_url)
+        path = parsed.path
+
         # Strategy 1: standard path style (endpoint/bucket/key)
         path_style_prefix = f"/{bucket_name}/"
-        if path_style_prefix in recording_url:
-            key = recording_url.split(path_style_prefix, 1)[1]
+        if path_style_prefix in path:
+            key = path.split(path_style_prefix, 1)[1]
 
         # Strategy 2: virtual hosted style (bucket.s3.../key) or just parsing path if we trust the URL structure
-        if not key:
-            parsed = urlparse(recording_url)
-            # If path starts with /bucket_name/, we already caught it in strategy 1 (usually).
-            # If host contains bucket name (virtual hosted), path is the key.
-            if bucket_name in parsed.netloc:
-                 key = parsed.path.lstrip("/")
-            # If we simply can't find it, we might just assume it's the filename if it looks like one
-            elif recording_url.endswith(".mp4"):
-                 key = recording_url.split("/")[-1]
+        elif bucket_name in parsed.netloc:
+             key = path.lstrip("/")
+
+        # Strategy 3: Filename fallback (check parsed path, not full URL, to ignore query params)
+        elif path.endswith(".mp4"):
+             key = path.split("/")[-1]
 
         if not key:
+            logger.warning(f"Could not extract S3 key from recording URL: {recording_url}")
             return recording_url
 
         response = s3_client.generate_presigned_url(
@@ -206,7 +208,7 @@ def generate_presigned_url(recording_url: str, expiration=3600) -> Optional[str]
         return response
 
     except Exception as e:
-        logger.error(f"Error generating presigned URL: {e}")
+        logger.error(f"Error generating presigned URL for {recording_url}: {e}")
         return recording_url
 
 @app.get("/dashboard/calls")
@@ -231,16 +233,6 @@ async def get_call_details(call_id: int):
     """Get details for a specific call, including transcript."""
     if not db_instance:
         raise HTTPException(status_code=503, detail="Database not available")
-
-    # Since get_recent_calls returns a list, and we don't have get_call_by_id yet,
-    # we can re-use get_recent_calls filtered or implement a new method.
-    # For now, let's implement a simple fetch from DB directly if possible or add method to NeonDB
-    # But since I can't modify NeonDB interface easily without touching both implementations,
-    # I'll rely on a new method I should add to NeonDB/SQLiteDB.
-
-    # Wait, I already added methods to NeonDB class in the previous step?
-    # No, I only added `get_recent_calls`.
-    # Let's add a `get_call` method to the DB classes.
 
     try:
         call = await db_instance.get_call(call_id)
