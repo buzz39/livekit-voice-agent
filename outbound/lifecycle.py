@@ -70,6 +70,14 @@ async def finalize_call(
     except Exception as e:
         logger.warning(f"Failed to capture transcript: {e}")
 
+    # Extract metadata fields
+    interest_level = call_metadata.get("interest_level")
+    objection = call_metadata.get("objection")
+
+    # Combine notes
+    notes_list = call_metadata.get("notes", [])
+    notes = "\n".join(notes_list) if notes_list else None
+
     # Persist to DB immediately
     call_id = call_metadata.get("call_id")
     try:
@@ -87,7 +95,10 @@ async def finalize_call(
                 transcript=transcript_text,
                 captured_data=call_metadata,
                 email_captured=email_flag,
-                recording_url=constructed_rec_url
+                recording_url=constructed_rec_url,
+                interest_level=interest_level,
+                objection=objection,
+                notes=notes
             )
         else:
             logger.info("Logging new call record (no existing ID found)")
@@ -100,6 +111,9 @@ async def finalize_call(
                 transcript=transcript_text,
                 captured_data=call_metadata,
                 email_captured=email_flag,
+                interest_level=interest_level,
+                objection=objection,
+                notes=notes
             )
 
         await dispatcher.dispatch(
