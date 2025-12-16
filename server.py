@@ -62,11 +62,11 @@ SIP_FROM_NUMBER = os.getenv("SIP_FROM_NUMBER", "+12029787305") # Default from ex
 class OutboundCallRequest(BaseModel):
     phone_number: str
     business_name: str
-    agent_slug: str = "default_roofing_agent"
+    agent_slug: str = "roofing_agent"
     provider: Optional[str] = None # 'twilio' or 'telnyx' or default/sip
 
 class PromptUpdateRequest(BaseModel):
-    name: str = "default_roofing_agent"
+    name: str = "roofing_agent"
     content: str
 
 async def initiate_outbound_call(request: OutboundCallRequest):
