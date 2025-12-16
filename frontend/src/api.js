@@ -21,7 +21,13 @@ export async function getRecentCalls(limit = 10) {
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
-    return await response.json();
+    const data = await response.json();
+    return data.map(call => {
+      if (call.recording_url && !call.recording_url.startsWith('http')) {
+        call.recording_url = `${API_BASE_URL}${call.recording_url.startsWith('/') ? '' : '/'}${call.recording_url}`;
+      }
+      return call;
+    });
   } catch (error) {
     console.error("Failed to fetch calls:", error);
     return [];
@@ -34,7 +40,11 @@ export async function getCallDetails(callId) {
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
-    return await response.json();
+    const data = await response.json();
+    if (data && data.recording_url && !data.recording_url.startsWith('http')) {
+      data.recording_url = `${API_BASE_URL}${data.recording_url.startsWith('/') ? '' : '/'}${data.recording_url}`;
+    }
+    return data;
   } catch (error) {
     console.error(`Failed to fetch call details for ${callId}:`, error);
     return null;

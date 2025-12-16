@@ -20,22 +20,22 @@ const StatsCard = ({ title, value, subtext, chartColor = "#6366f1" }) => {
         <div className="text-emerald-400 text-xs mt-1 font-medium">{subtext}</div>
       </div>
 
-      <div className="h-24 mt-4 -mx-2">
-        <ResponsiveContainer width="100%" height="100%">
+      <div className="h-24 mt-4 -mx-2 w-full min-w-0">
+        <ResponsiveContainer width="100%" height="100%" minWidth={0}>
           <AreaChart data={data}>
             <defs>
               <linearGradient id={`color${title.replace(/\s/g, '')}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor={chartColor} stopOpacity={0.3}/>
-                <stop offset="95%" stopColor={chartColor} stopOpacity={0}/>
+                <stop offset="5%" stopColor={chartColor} stopOpacity={0.3} />
+                <stop offset="95%" stopColor={chartColor} stopOpacity={0} />
               </linearGradient>
             </defs>
             <Area
-                type="monotone"
-                dataKey="value"
-                stroke={chartColor}
-                strokeWidth={2}
-                fillOpacity={1}
-                fill={`url(#color${title.replace(/\s/g, '')})`}
+              type="monotone"
+              dataKey="value"
+              stroke={chartColor}
+              strokeWidth={2}
+              fillOpacity={1}
+              fill={`url(#color${title.replace(/\s/g, '')})`}
             />
           </AreaChart>
         </ResponsiveContainer>

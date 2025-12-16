@@ -228,7 +228,7 @@ async def get_dashboard_calls(limit: int = 10):
         for call in calls:
             if call.get("recording_url"):
                 # Use the audio proxy endpoint
-                call["recording_url"] = f"/dashboard/audio/{call['id']}"
+                call["recording_url"] = f"https://livekit-outbound-api.tinysaas.fun/dashboard/audio/{call['id']}"
         return calls
     except Exception as e:
         logger.error(f"Error fetching calls: {e}")
@@ -246,7 +246,7 @@ async def get_call_details(call_id: int):
              raise HTTPException(status_code=404, detail="Call not found")
 
         if call.get("recording_url"):
-            call["recording_url"] = f"/dashboard/audio/{call['id']}"
+            call["recording_url"] = f"https://livekit-outbound-api.tinysaas.fun/dashboard/audio/{call['id']}"
 
         return call
     except HTTPException:
