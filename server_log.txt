@@ -1,0 +1,14 @@
+INFO:     Started server process [7088]
+INFO:     Waiting for application startup.
+INFO:neon-db:Connected to Neon database
+INFO:outbound-server:Database connection established
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:43474 - "GET /dashboard/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43480 - "GET /dashboard/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43474 - "GET /dashboard/calls?limit=10 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43480 - "GET /dashboard/calls?limit=10 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43440 - "GET /dashboard/prompt?name=default_roofing_agent HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43428 - "GET /dashboard/prompts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43452 - "GET /dashboard/prompt?name=default_roofing_agent HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43440 - "GET /dashboard/prompts HTTP/1.1" 200 OK

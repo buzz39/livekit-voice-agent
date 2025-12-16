@@ -1,26 +1,40 @@
 import React, { useState, useEffect } from 'react';
 import { Save, AlertCircle, CheckCircle } from 'lucide-react';
-import { getActivePrompt, updateActivePrompt } from '../../api';
+import { getActivePrompt, updateActivePrompt, getAllPrompts } from '../../api';
 
 export default function PromptPanel() {
   const [prompt, setPrompt] = useState('');
+  const [selectedPromptName, setSelectedPromptName] = useState('default_roofing_agent');
+  const [availablePrompts, setAvailablePrompts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null); // 'success', 'error'
   const [message, setMessage] = useState('');
 
   useEffect(() => {
-    loadPrompt();
+    fetchPrompts();
   }, []);
 
-  const loadPrompt = async () => {
+  useEffect(() => {
+    loadPrompt(selectedPromptName);
+  }, [selectedPromptName]);
+
+  const fetchPrompts = async () => {
+    const prompts = await getAllPrompts();
+    if (prompts && prompts.length > 0) {
+      setAvailablePrompts(prompts);
+      // Optional: Set default selection if current one isn't in list,
+      // but we default to 'default_roofing_agent' which should exist.
+    }
+  };
+
+  const loadPrompt = async (name) => {
     setLoading(true);
-    const data = await getActivePrompt();
+    const data = await getActivePrompt(name);
     if (data) {
       setPrompt(data.content);
     } else {
       setPrompt('');
-      // Don't show error immediately, maybe just empty
     }
     setLoading(false);
   };
@@ -29,7 +43,7 @@ export default function PromptPanel() {
     setSaving(true);
     setStatus(null);
     try {
-      await updateActivePrompt(prompt);
+      await updateActivePrompt(prompt, selectedPromptName);
       setStatus('success');
       setMessage('Prompt updated successfully');
       setTimeout(() => setStatus(null), 3000);
@@ -44,7 +58,24 @@ export default function PromptPanel() {
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-lg p-6 flex flex-col h-full">
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider">Agent Prompt</h3>
+        <div className="flex items-center gap-4">
+            <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider">Agent Prompt</h3>
+            <select
+                value={selectedPromptName}
+                onChange={(e) => setSelectedPromptName(e.target.value)}
+                className="bg-slate-800 text-slate-200 text-xs border border-slate-700 rounded px-2 py-1 focus:outline-none focus:border-indigo-500"
+            >
+                {availablePrompts.length > 0 ? (
+                    availablePrompts.map((p) => (
+                        <option key={p.name} value={p.name}>
+                            {p.name}
+                        </option>
+                    ))
+                ) : (
+                    <option value="default_roofing_agent">Default</option>
+                )}
+            </select>
+        </div>
         {status && (
           <div className={`text-xs flex items-center gap-1 ${status === 'success' ? 'text-emerald-400' : 'text-red-400'}`}>
             {status === 'success' ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
