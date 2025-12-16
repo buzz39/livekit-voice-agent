@@ -11,7 +11,7 @@ from livekit.agents import (
     cli,
     get_job_context,
 )
-from livekit.plugins import deepgram, openai, silero
+from livekit.plugins import deepgram, openai, silero, inworld
 from livekit import api
 from livekit import rtc
 
@@ -134,6 +134,8 @@ async def entrypoint(ctx: JobContext):
     # Configure TTS based on provider
     if ai_config["tts_provider"] == "openai":
         tts = openai.TTS(model=ai_config.get("tts_model", "tts-1"), voice=ai_config.get("tts_voice", "alloy"))
+    elif ai_config["tts_provider"] == "inworld":
+        tts = inworld.TTS(voice=ai_config.get("tts_voice", "Sarah"))
     else:
         logger.warning(f"Unsupported TTS provider: {ai_config['tts_provider']}, using OpenAI")
         tts = openai.TTS(model="tts-1", voice="alloy")
