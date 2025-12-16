@@ -128,6 +128,46 @@ class NeonDB:
             """, contact_id, room_id, prompt_id, duration_seconds,
                 interest_level, objection, notes, email_captured, call_status, transcript, json_data)
             return row["id"]
+
+    async def update_call(
+        self,
+        call_id: int,
+        duration_seconds: Optional[int] = None,
+        interest_level: Optional[str] = None,
+        objection: Optional[str] = None,
+        notes: Optional[str] = None,
+        email_captured: bool = False,
+        call_status: str = "completed",
+        transcript: Optional[str] = None,
+        captured_data: Optional[Dict[str, Any]] = None,
+        recording_url: Optional[str] = None
+    ):
+        """Update an existing call record."""
+        async with self.pool.acquire() as conn:
+            # Safe JSON serialization
+            # If captured_data is explicitly None, we want to preserve existing data.
+            # But here we are passing it to COALESCE.
+            # However, json.dumps(None) is 'null', not None.
+            # If captured_data is None, we want $9 to be NULL so COALESCE picks the existing value.
+
+            json_data = json.dumps(captured_data) if captured_data is not None else None
+
+            await conn.execute("""
+                UPDATE calls
+                SET
+                    duration_seconds = COALESCE($2, duration_seconds),
+                    interest_level = COALESCE($3, interest_level),
+                    objection = COALESCE($4, objection),
+                    notes = COALESCE($5, notes),
+                    email_captured = COALESCE($6, email_captured),
+                    call_status = COALESCE($7, call_status),
+                    transcript = COALESCE($8, transcript),
+                    captured_data = COALESCE($9, captured_data),
+                    recording_url = COALESCE($10, recording_url),
+                    updated_at = NOW()
+                WHERE id = $1
+            """, call_id, duration_seconds, interest_level, objection, notes,
+                 email_captured, call_status, transcript, json_data, recording_url)
     
     async def update_call_recording(self, room_id: str, recording_url: str):
         """Update the recording URL for a call."""
