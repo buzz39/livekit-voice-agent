@@ -71,9 +71,9 @@ async def finalize_call(
         logger.warning(f"Failed to capture transcript: {e}")
 
     # Persist to DB immediately
+    call_id = call_metadata.get("call_id")
     try:
         email_flag = bool(call_metadata.get("email"))
-        call_id = call_metadata.get("call_id")
 
         # Priority: constructed URL from EgressManager (if available)
         constructed_rec_url = call_metadata.get("recording_url")
@@ -120,7 +120,8 @@ async def finalize_call(
     if rec_url:
         logger.info(f"Using constructed recording URL: {rec_url}")
         try:
-            await db.update_call_recording(ctx.room.name, rec_url)
+            # Pass call_id to target specific row if available
+            await db.update_call_recording(ctx.room.name, rec_url, call_id=call_id)
             await dispatcher.dispatch("call.recording.ready", {"room_id": ctx.room.name, "recording_url": rec_url, "contact_id": contact_id})
         except Exception as e:
             logger.error(f"Failed to update recording URL from metadata: {e}")
@@ -136,7 +137,8 @@ async def finalize_call(
                     first = recordings[0]
                     fetched_url = getattr(first, "url", None) or getattr(first, "download_url", None) or (first.get("url") if isinstance(first, dict) else None)
                     if fetched_url:
-                        await db.update_call_recording(ctx.room.name, fetched_url)
+                        # Pass call_id here as well
+                        await db.update_call_recording(ctx.room.name, fetched_url, call_id=call_id)
                         logger.info(f"Recording URL captured via API: {fetched_url}")
                         await dispatcher.dispatch("call.recording.ready", {"room_id": ctx.room.name, "recording_url": fetched_url, "contact_id": contact_id})
                         break

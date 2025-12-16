@@ -115,7 +115,11 @@ class NeonDB:
         """Log call details, return call_id."""
         async with self.pool.acquire() as conn:
             # Safe JSON serialization
-            json_data = json.dumps(captured_data) if captured_data else '{}'
+            try:
+                json_data = json.dumps(captured_data) if captured_data else '{}'
+            except TypeError as e:
+                logger.error(f"Failed to serialize captured_data in log_call: {e}")
+                json_data = '{}'
             
             row = await conn.fetchrow("""
                 INSERT INTO calls (
@@ -145,38 +149,59 @@ class NeonDB:
         """Update an existing call record."""
         async with self.pool.acquire() as conn:
             # Safe JSON serialization
-            # If captured_data is explicitly None, we want to preserve existing data.
-            # But here we are passing it to COALESCE.
-            # However, json.dumps(None) is 'null', not None.
-            # If captured_data is None, we want $9 to be NULL so COALESCE picks the existing value.
+            try:
+                # If captured_data is explicitly None, we want to preserve existing data.
+                # But here we are passing it to COALESCE.
+                # However, json.dumps(None) is 'null', not None.
+                # If captured_data is None, we want $9 to be NULL so COALESCE picks the existing value.
+                json_data = json.dumps(captured_data) if captured_data is not None else None
+            except TypeError as e:
+                logger.error(f"Failed to serialize captured_data for call {call_id}: {e}")
+                # Log what we tried to serialize (truncated)
+                try:
+                    logger.debug(f"captured_data (truncated): {str(captured_data)[:1000]}")
+                except:
+                    pass
+                json_data = None # Fallback to not updating it
 
-            json_data = json.dumps(captured_data) if captured_data is not None else None
-
-            await conn.execute("""
-                UPDATE calls
-                SET
-                    duration_seconds = COALESCE($2, duration_seconds),
-                    interest_level = COALESCE($3, interest_level),
-                    objection = COALESCE($4, objection),
-                    notes = COALESCE($5, notes),
-                    email_captured = COALESCE($6, email_captured),
-                    call_status = COALESCE($7, call_status),
-                    transcript = COALESCE($8, transcript),
-                    captured_data = COALESCE($9, captured_data),
-                    recording_url = COALESCE($10, recording_url),
-                    updated_at = NOW()
-                WHERE id = $1
-            """, call_id, duration_seconds, interest_level, objection, notes,
-                 email_captured, call_status, transcript, json_data, recording_url)
+            try:
+                await conn.execute("""
+                    UPDATE calls
+                    SET
+                        duration_seconds = COALESCE($2, duration_seconds),
+                        interest_level = COALESCE($3, interest_level),
+                        objection = COALESCE($4, objection),
+                        notes = COALESCE($5, notes),
+                        email_captured = COALESCE($6, email_captured),
+                        call_status = COALESCE($7, call_status),
+                        transcript = COALESCE($8, transcript),
+                        captured_data = COALESCE($9, captured_data),
+                        recording_url = COALESCE($10, recording_url),
+                        updated_at = NOW()
+                    WHERE id = $1
+                """, call_id, duration_seconds, interest_level, objection, notes,
+                     email_captured, call_status, transcript, json_data, recording_url)
+            except Exception as e:
+                logger.error(f"DB Update failed for call {call_id}: {e}")
+                raise e
     
-    async def update_call_recording(self, room_id: str, recording_url: str):
+    async def update_call_recording(self, room_id: str, recording_url: str, call_id: Optional[int] = None):
         """Update the recording URL for a call."""
         async with self.pool.acquire() as conn:
-            await conn.execute("""
-                UPDATE calls
-                SET recording_url = $2
-                WHERE room_id = $1
-            """, room_id, recording_url)
+            if call_id:
+                # Targeted update by ID (preferred)
+                await conn.execute("""
+                    UPDATE calls
+                    SET recording_url = $2
+                    WHERE id = $1
+                """, call_id, recording_url)
+            else:
+                # Legacy: update by room_id (may affect multiple rows if room_id is reused)
+                await conn.execute("""
+                    UPDATE calls
+                    SET recording_url = $2
+                    WHERE room_id = $1
+                """, room_id, recording_url)
 
     async def get_prompt_id(self, name: str = "default_roofing_agent") -> Optional[int]:
         """Get prompt ID by name."""
