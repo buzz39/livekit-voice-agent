@@ -176,8 +176,7 @@ class NeonDB:
                         call_status = COALESCE($7, call_status),
                         transcript = COALESCE($8, transcript),
                         captured_data = COALESCE($9, captured_data),
-                        recording_url = COALESCE($10, recording_url),
-                        updated_at = NOW()
+                        recording_url = COALESCE($10, recording_url)
                     WHERE id = $1
                 """, call_id, duration_seconds, interest_level, objection, notes,
                      email_captured, call_status, transcript, json_data, recording_url)
