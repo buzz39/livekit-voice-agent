@@ -110,6 +110,11 @@ async def entrypoint(ctx: JobContext):
         except Exception as e:
             logger.error(f"Failed to disconnect room: {e}")
 
+        # Trigger finalize manually just in case event didn't fire (robustness)
+        # We await it to ensure data is persisted before the process potentially exits or context is lost.
+        if 'finalize_call' in locals():
+            await finalize_call()
+
         # Explicitly delete the room to ensure SIP call ends
         try:
             await ctx.api.room.delete_room(api.DeleteRoomRequest(room=ctx.room.name))
