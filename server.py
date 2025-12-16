@@ -13,6 +13,7 @@ from livekit.protocol.sip import CreateSIPParticipantRequest
 from livekit.protocol.room import CreateRoomRequest
 from dotenv import load_dotenv
 from neon_db import get_db, NeonDB
+from audio_router import audio_router
 
 # Load environment variables
 load_dotenv()
@@ -42,6 +43,8 @@ async def lifespan(app: FastAPI):
         logger.info("Database connection closed")
 
 app = FastAPI(title="LiveKit Voice Agent Outbound API", lifespan=lifespan)
+
+app.include_router(audio_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -219,10 +222,13 @@ async def get_dashboard_calls(limit: int = 10):
 
     try:
         calls = await db_instance.get_recent_calls(limit=limit)
-        # Sign recording URLs
+        # Rewrite recording URLs to point to our proxy
+        # This fixes issues where the frontend (local) cannot access the S3/MinIO endpoint (internal docker)
+        # or avoids CORS/Presigning issues entirely.
         for call in calls:
             if call.get("recording_url"):
-                call["recording_url"] = generate_presigned_url(call["recording_url"])
+                # Use the audio proxy endpoint
+                call["recording_url"] = f"/dashboard/audio/{call['id']}"
         return calls
     except Exception as e:
         logger.error(f"Error fetching calls: {e}")
@@ -240,7 +246,7 @@ async def get_call_details(call_id: int):
              raise HTTPException(status_code=404, detail="Call not found")
 
         if call.get("recording_url"):
-            call["recording_url"] = generate_presigned_url(call["recording_url"])
+            call["recording_url"] = f"/dashboard/audio/{call['id']}"
 
         return call
     except HTTPException:
