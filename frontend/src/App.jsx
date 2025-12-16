@@ -77,7 +77,7 @@ function App() {
     }
   }, [callStatus]);
 
-  const handleStartCall = async (number) => {
+  const handleStartCall = async (number, businessName, agentSlug) => {
     setCallStatus('connecting');
     setLogs([{
       role: 'system',
@@ -86,7 +86,7 @@ function App() {
     }]);
 
     try {
-      await startOutboundCall(number);
+      await startOutboundCall(number, businessName, agentSlug);
       // Wait a bit then switch to active
       setTimeout(() => setCallStatus('active'), 2000);
 
@@ -164,7 +164,7 @@ function App() {
 
         {/* Right Column: Controls & Details */}
         <div className="col-span-12 md:col-span-4 h-full flex flex-col gap-6" style={{ height: 'calc(100% - 11rem)' }}>
-            <div className="h-1/2">
+            <div className="flex-shrink-0">
                 <ActiveCallPanel
                     status={callStatus}
                     onStartCall={handleStartCall}
@@ -172,7 +172,7 @@ function App() {
                 />
             </div>
 
-            <div className="h-1/2 bg-slate-900 border border-slate-800 rounded-lg p-6 overflow-y-auto">
+            <div className="flex-1 bg-slate-900 border border-slate-800 rounded-lg p-6 overflow-y-auto min-h-0">
                 <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-4">Recent Calls</h3>
                 <div className="space-y-4">
                     {recentCalls.map((call) => (

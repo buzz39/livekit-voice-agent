@@ -3,6 +3,8 @@ import { Phone, Mic, MicOff, PhoneOff } from 'lucide-react';
 
 const ActiveCallPanel = ({ status, onStartCall, onEndCall }) => {
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [businessName, setBusinessName] = useState('');
+  const [agentSlug, setAgentSlug] = useState('roofing_agent');
 
   const isCallActive = status === 'active';
 
@@ -34,8 +36,22 @@ const ActiveCallPanel = ({ status, onStartCall, onEndCall }) => {
               value={phoneNumber}
               onChange={(e) => setPhoneNumber(e.target.value)}
             />
+            <input
+              type="text"
+              placeholder="Enter business name..."
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              value={businessName}
+              onChange={(e) => setBusinessName(e.target.value)}
+            />
+            <input
+              type="text"
+              placeholder="Enter agent slug..."
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              value={agentSlug}
+              onChange={(e) => setAgentSlug(e.target.value)}
+            />
             <button
-              onClick={() => onStartCall(phoneNumber)}
+              onClick={() => onStartCall(phoneNumber, businessName, agentSlug)}
               className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               disabled={!phoneNumber}
             >
