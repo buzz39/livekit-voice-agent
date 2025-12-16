@@ -34,6 +34,18 @@ export async function getRecentCalls(limit = 10) {
   }
 }
 
+// Get all prompts
+export const getAllPrompts = async () => {
+    try {
+        const response = await fetch(`${API_BASE_URL}/dashboard/prompts`);
+        if (!response.ok) throw new Error('Failed to fetch prompts');
+        return await response.json();
+    } catch (error) {
+        console.error('Error fetching prompts:', error);
+        return [];
+    }
+};
+
 // Get active prompt
 export const getActivePrompt = async (name = "default_roofing_agent") => {
     try {

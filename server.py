@@ -159,6 +159,19 @@ async def get_dashboard_stats():
         logger.error(f"Error fetching stats: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+@app.get("/dashboard/prompts")
+async def get_all_prompts():
+    """Get all available prompts."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    try:
+        prompts = await db_instance.get_all_prompts()
+        return prompts
+    except Exception as e:
+        logger.error(f"Error fetching prompts: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 @app.get("/dashboard/prompt")
 async def get_active_prompt(name: str = "default_roofing_agent"):
     """Get active prompt."""

@@ -52,6 +52,12 @@ class NeonDB:
                 name
             )
             return row["content"] if row else None
+
+    async def get_all_prompts(self) -> List[Dict[str, Any]]:
+        """Fetch all available prompts."""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("SELECT name, is_active FROM prompts ORDER BY name")
+            return [dict(row) for row in rows]
     
     async def update_active_prompt(self, name: str, content: str):
         """Update active prompt content."""
