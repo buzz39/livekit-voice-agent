@@ -12,7 +12,8 @@ import logging
 import json
 from typing import Optional, Dict, Any, List, Union
 import asyncpg
-from datetime import datetime
+import aiosqlite
+from datetime import datetime, timedelta
 
 logger = logging.getLogger("neon-db")
 
@@ -78,8 +79,6 @@ class NeonDB:
 
     async def update_contact_email(self, contact_id: Union[int, str], email: str):
         """Update contact email."""
-        # Ensure contact_id is an integer if possible, though asyncpg handles types well if they match the DB.
-        # contacts.id is SERIAL (integer).
         if isinstance(contact_id, str) and contact_id.isdigit():
             contact_id = int(contact_id)
 
@@ -196,7 +195,7 @@ class NeonDB:
                 ORDER BY c.created_at DESC
                 LIMIT $1
             """, limit)
-            # Convert rows to dicts and handle datetime serialization if needed (though API usually handles JSON)
+            # Convert rows to dicts
             result = []
             for row in rows:
                 row_dict = dict(row)
@@ -204,6 +203,32 @@ class NeonDB:
                     row_dict['created_at'] = row_dict['created_at'].isoformat()
                 result.append(row_dict)
             return result
+
+    async def get_call(self, call_id: int) -> Optional[Dict[str, Any]]:
+        """Fetch a specific call by ID."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT
+                    c.id,
+                    c.call_status,
+                    c.duration_seconds,
+                    c.created_at,
+                    c.interest_level,
+                    c.transcript,
+                    c.recording_url,
+                    con.contact_name,
+                    con.phone_number,
+                    con.business_name
+                FROM calls c
+                LEFT JOIN contacts con ON c.contact_id = con.id
+                WHERE c.id = $1
+            """, call_id)
+            if not row:
+                return None
+            row_dict = dict(row)
+            if row_dict.get('created_at'):
+                row_dict['created_at'] = row_dict['created_at'].isoformat()
+            return row_dict
     
     async def get_webhooks(self, slug: str) -> List[Dict[str, Any]]:
         """Fetch active webhooks for the agent."""
@@ -240,8 +265,210 @@ class NeonDB:
             return dict(row) if row else None
 
 
-async def get_db() -> NeonDB:
-    """Create a new database instance for each job (not reused across event loops)."""
-    db = NeonDB()
+class SQLiteDB:
+    """SQLite fallback for local development."""
+    def __init__(self, db_path: str = "local.db"):
+        self.db_path = db_path
+        self.conn = None
+
+    async def connect(self):
+        self.conn = await aiosqlite.connect(self.db_path)
+        self.conn.row_factory = aiosqlite.Row
+        await self._init_schema()
+        logger.info("Connected to SQLite database")
+
+    async def close(self):
+        if self.conn:
+            await self.conn.close()
+            logger.info("Closed SQLite database")
+
+    async def _init_schema(self):
+        """Initialize schema if not exists."""
+        async with self.conn.cursor() as cur:
+            await cur.execute("""
+                CREATE TABLE IF NOT EXISTS contacts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    phone_number TEXT UNIQUE,
+                    business_name TEXT,
+                    contact_name TEXT,
+                    email TEXT,
+                    interest_level TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            await cur.execute("""
+                CREATE TABLE IF NOT EXISTS calls (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    contact_id INTEGER,
+                    room_id TEXT,
+                    prompt_id INTEGER,
+                    duration_seconds INTEGER,
+                    interest_level TEXT,
+                    objection TEXT,
+                    notes TEXT,
+                    email_captured BOOLEAN,
+                    call_status TEXT,
+                    transcript TEXT,
+                    captured_data TEXT,
+                    recording_url TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(contact_id) REFERENCES contacts(id)
+                )
+            """)
+            await cur.execute("""
+                CREATE TABLE IF NOT EXISTS prompts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE,
+                    content TEXT,
+                    is_active BOOLEAN DEFAULT 1
+                )
+            """)
+            await cur.execute("""
+                 CREATE TABLE IF NOT EXISTS objections (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    objection_text TEXT UNIQUE,
+                    response_text TEXT,
+                    frequency INTEGER DEFAULT 1,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                 )
+            """)
+            await self.conn.commit()
+
+            # Seed data if empty
+            await cur.execute("SELECT COUNT(*) FROM contacts")
+            count = (await cur.fetchone())[0]
+            if count == 0:
+                await cur.execute("""
+                    INSERT INTO contacts (phone_number, business_name, contact_name, email, interest_level)
+                    VALUES
+                    ('+15551234567', 'Acme Corp', 'John Doe', 'john@acme.com', 'Warm'),
+                    ('+15559876543', 'Beta Industries', 'Jane Smith', 'jane@beta.com', 'Hot')
+                """)
+                # Seed calls
+                await cur.execute("""
+                    INSERT INTO calls (contact_id, duration_seconds, interest_level, call_status, transcript, created_at)
+                    VALUES
+                    (1, 120, 'Warm', 'completed', '[{"role": "agent", "text": "Hello"}, {"role": "user", "text": "Hi"}]', date('now', '-1 day')),
+                    (2, 300, 'Hot', 'completed', '[{"role": "agent", "text": "Deal?"}, {"role": "user", "text": "Yes"}]', date('now', '-2 days'))
+                """)
+                await self.conn.commit()
+
+    async def get_call_stats(self, days: int = 7) -> Dict[str, Any]:
+        cursor = await self.conn.execute(f"""
+            SELECT
+                COUNT(*) as total_calls,
+                COUNT(CASE WHEN interest_level = 'Hot' THEN 1 END) as hot_leads,
+                COUNT(CASE WHEN interest_level = 'Warm' THEN 1 END) as warm_leads,
+                COUNT(CASE WHEN email_captured = 1 THEN 1 END) as emails_captured,
+                AVG(duration_seconds) as avg_duration
+            FROM calls
+            WHERE created_at > date('now', '-{days} days')
+        """)
+        row = await cursor.fetchone()
+        return dict(row) if row else {}
+
+    async def get_recent_calls(self, limit: int = 10) -> List[Dict[str, Any]]:
+        cursor = await self.conn.execute(f"""
+            SELECT
+                c.id,
+                c.call_status,
+                c.duration_seconds,
+                c.created_at,
+                c.interest_level,
+                c.transcript,
+                c.recording_url,
+                con.contact_name,
+                con.phone_number,
+                con.business_name
+            FROM calls c
+            LEFT JOIN contacts con ON c.contact_id = con.id
+            ORDER BY c.created_at DESC
+            LIMIT {limit}
+        """)
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    async def get_call(self, call_id: int) -> Optional[Dict[str, Any]]:
+        cursor = await self.conn.execute("""
+            SELECT
+                c.id,
+                c.call_status,
+                c.duration_seconds,
+                c.created_at,
+                c.interest_level,
+                c.transcript,
+                c.recording_url,
+                con.contact_name,
+                con.phone_number,
+                con.business_name
+            FROM calls c
+            LEFT JOIN contacts con ON c.contact_id = con.id
+            WHERE c.id = ?
+        """, (call_id,))
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    # Implementing other methods as no-ops or simple mocks if needed for the UI to not crash
+    async def get_active_prompt(self, name: str = "default_roofing_agent") -> Optional[str]:
+        return "This is a mock prompt."
+
+    async def upsert_contact(self, phone_number, business_name=None, contact_name=None, email=None, interest_level=None):
+        async with self.conn.execute("""
+            INSERT INTO contacts (phone_number, business_name, contact_name, email, interest_level)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(phone_number) DO UPDATE SET
+            business_name=coalesce(excluded.business_name, contacts.business_name),
+            updated_at=CURRENT_TIMESTAMP
+            RETURNING id
+        """, (phone_number, business_name, contact_name, email, interest_level)) as cursor:
+            row = await cursor.fetchone()
+            await self.conn.commit()
+            return row['id']
+
+    async def log_call(self, contact_id, room_id, prompt_id=None, duration_seconds=None, interest_level=None, objection=None, notes=None, email_captured=False, call_status="completed", transcript=None, captured_data=None):
+        json_data = json.dumps(captured_data) if captured_data else '{}'
+        async with self.conn.execute("""
+            INSERT INTO calls (contact_id, room_id, prompt_id, duration_seconds, interest_level, objection, notes, email_captured, call_status, transcript, captured_data)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
+        """, (contact_id, room_id, prompt_id, duration_seconds, interest_level, objection, notes, email_captured, call_status, transcript, json_data)) as cursor:
+            row = await cursor.fetchone()
+            await self.conn.commit()
+            return row['id']
+
+    async def update_call_recording(self, room_id: str, recording_url: str):
+         await self.conn.execute("UPDATE calls SET recording_url = ? WHERE room_id = ?", (recording_url, room_id))
+         await self.conn.commit()
+
+    async def get_agent_config(self, slug: str = "default-agent") -> Optional[Dict[str, Any]]:
+        return None
+
+    async def get_ai_config(self, name: str = "default_telephony_config") -> Optional[Dict[str, Any]]:
+        return None
+
+    async def get_data_schema(self, slug: str = "default_roofing_agent") -> List[Dict[str, Any]]:
+        return []
+
+    async def get_webhooks(self, slug: str) -> List[Dict[str, Any]]:
+        return []
+
+    async def update_contact_email(self, contact_id: Union[int, str], email: str):
+        pass
+
+    async def get_prompt_id(self, name: str = "default_roofing_agent") -> Optional[int]:
+        return 1
+
+    async def track_objection(self, objection_text: str, response_text: Optional[str] = None):
+        pass
+
+
+async def get_db() -> Union[NeonDB, SQLiteDB]:
+    """Create a new database instance for each job."""
+    if os.getenv("NEON_DATABASE_URL"):
+        db = NeonDB()
+    else:
+        logger.warning("Using SQLite fallback database")
+        db = SQLiteDB()
     await db.connect()
     return db
