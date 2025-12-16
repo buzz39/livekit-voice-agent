@@ -1,6 +1,6 @@
 // Frontend API Client
 
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = 'https://livekit-outbound-api.tinysaas.fun';
 
 export async function getStats() {
   try {
