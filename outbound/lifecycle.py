@@ -73,16 +73,35 @@ async def finalize_call(
     # Persist to DB immediately
     try:
         email_flag = bool(call_metadata.get("email"))
-        await db.log_call(
-            contact_id=contact_id,
-            room_id=ctx.room.name,
-            prompt_id=prompt_id,
-            duration_seconds=duration_seconds,
-            call_status="completed",
-            transcript=transcript_text,
-            captured_data=call_metadata,
-            email_captured=email_flag,
-        )
+        call_id = call_metadata.get("call_id")
+
+        # Priority: constructed URL from EgressManager (if available)
+        constructed_rec_url = call_metadata.get("recording_url")
+
+        if call_id:
+            logger.info(f"Updating existing call {call_id}")
+            await db.update_call(
+                call_id=call_id,
+                duration_seconds=duration_seconds,
+                call_status="completed",
+                transcript=transcript_text,
+                captured_data=call_metadata,
+                email_captured=email_flag,
+                recording_url=constructed_rec_url
+            )
+        else:
+            logger.info("Logging new call record (no existing ID found)")
+            await db.log_call(
+                contact_id=contact_id,
+                room_id=ctx.room.name,
+                prompt_id=prompt_id,
+                duration_seconds=duration_seconds,
+                call_status="completed",
+                transcript=transcript_text,
+                captured_data=call_metadata,
+                email_captured=email_flag,
+            )
+
         await dispatcher.dispatch(
             "call.completed",
             {"room_id": ctx.room.name, "contact_id": contact_id, "duration_seconds": duration_seconds, "email_captured": email_flag},
@@ -91,7 +110,7 @@ async def finalize_call(
     except Exception as e:
         logger.error(f"Failed to persist final call data: {e}")
 
-    # Try to get recording URL.
+    # Try to get recording URL (if not already set).
     # Priority:
     # 1. URL constructed by EgressManager (stored in metadata)
     # 2. LiveKit API list_recordings (fallback)

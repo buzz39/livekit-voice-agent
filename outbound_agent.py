@@ -73,6 +73,21 @@ async def entrypoint(ctx: JobContext):
     contact_id = await db.upsert_contact(phone_number, business_name)
     prompt_id = await db.get_prompt_id(agent_slug)
 
+    # 4. Log Call Initiation
+    # Log the call immediately so it shows up in DB even if it crashes later
+    try:
+        call_id = await db.log_call(
+            contact_id=contact_id,
+            room_id=ctx.room.name,
+            prompt_id=prompt_id,
+            call_status="initiated",
+            captured_data=call_metadata
+        )
+        call_metadata["call_id"] = call_id
+        logger.info(f"Call initiated in DB with ID: {call_id}")
+    except Exception as e:
+        logger.error(f"Failed to log initial call record: {e}")
+
     # Initialize EgressManager early
     egress_manager = EgressManager(ctx.api)
 
