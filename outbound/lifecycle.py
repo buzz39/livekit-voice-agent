@@ -102,7 +102,7 @@ async def finalize_call(
             )
         else:
             logger.info("Logging new call record (no existing ID found)")
-            await db.log_call(
+            call_id = await db.log_call(
                 contact_id=contact_id,
                 room_id=ctx.room.name,
                 prompt_id=prompt_id,
