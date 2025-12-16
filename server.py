@@ -65,6 +65,10 @@ class OutboundCallRequest(BaseModel):
     agent_slug: str = "default_roofing_agent"
     provider: Optional[str] = None # 'twilio' or 'telnyx' or default/sip
 
+class PromptUpdateRequest(BaseModel):
+    name: str = "default_roofing_agent"
+    content: str
+
 async def initiate_outbound_call(request: OutboundCallRequest):
     """
     Background task to create room and initiate SIP call.
@@ -153,6 +157,36 @@ async def get_dashboard_stats():
         return stats
     except Exception as e:
         logger.error(f"Error fetching stats: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/dashboard/prompt")
+async def get_active_prompt(name: str = "default_roofing_agent"):
+    """Get active prompt."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    try:
+        content = await db_instance.get_active_prompt(name)
+        if not content:
+             raise HTTPException(status_code=404, detail="Prompt not found")
+        return {"name": name, "content": content}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching prompt: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/dashboard/prompt")
+async def update_active_prompt(request: PromptUpdateRequest):
+    """Update active prompt."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    try:
+        await db_instance.update_active_prompt(request.name, request.content)
+        return {"status": "success", "message": "Prompt updated"}
+    except Exception as e:
+        logger.error(f"Error updating prompt: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 def generate_presigned_url(recording_url: str, expiration=3600) -> Optional[str]:
