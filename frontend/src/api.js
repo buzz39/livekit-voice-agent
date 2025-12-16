@@ -41,7 +41,7 @@ export async function getCallDetails(callId) {
   }
 }
 
-export async function startOutboundCall(phoneNumber, businessName = "Default Business") {
+export async function startOutboundCall(phoneNumber, businessName = "Default Business", agentSlug = "default_roofing_agent") {
   try {
     const response = await fetch(`${API_BASE_URL}/outbound-call`, {
       method: 'POST',
@@ -51,7 +51,7 @@ export async function startOutboundCall(phoneNumber, businessName = "Default Bus
       body: JSON.stringify({
         phone_number: phoneNumber,
         business_name: businessName,
-        agent_slug: 'default_roofing_agent' // Configurable if needed
+        agent_slug: agentSlug
       }),
     });
     if (!response.ok) {
