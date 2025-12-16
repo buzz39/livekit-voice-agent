@@ -136,6 +136,11 @@ function App() {
                             <div className="text-xs text-slate-500 mt-1">
                                 {call.created_at ? new Date(call.created_at).toLocaleString() : ''}
                             </div>
+                            {call.recording_url && (
+                                <div className="mt-2">
+                                    <audio controls src={call.recording_url} className="w-full h-8" />
+                                </div>
+                            )}
                         </div>
                     ))}
                     {recentCalls.length === 0 && (
