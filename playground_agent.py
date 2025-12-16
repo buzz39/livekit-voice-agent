@@ -119,7 +119,16 @@ class PlaygroundAgent:
             else:
                 tts = openai.TTS(model="tts-1", voice="alloy")
 
-            self.session = AgentSession(vad=silero.VAD.load(), stt=stt, llm=llm, tts=tts)
+            self.session = AgentSession(
+                vad=silero.VAD.load(
+                    min_speech_duration=0.2,
+                    min_silence_duration=0.2,
+                    activation_threshold=0.6,
+                ),
+                stt=stt,
+                llm=llm,
+                tts=tts
+            )
 
             # Wait for participant to join (CRITICAL: Wait BEFORE speaking)
             logger.info("Waiting for participant...")

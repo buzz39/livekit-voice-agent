@@ -184,7 +184,20 @@ async def entrypoint(ctx: JobContext):
         logger.warning(f"Unsupported TTS provider: {ai_config['tts_provider']}, using OpenAI")
         tts = openai.TTS(model="tts-1", voice="alloy")
 
-    session = AgentSession(vad=silero.VAD.load(), stt=stt, llm=llm, tts=tts)
+    # Tune VAD parameters to reduce self-interruption and false positives from noise/echo
+    # min_speech_duration: 0.2s (up from default ~0.05-0.1) to ignore short clicks/pops
+    # activation_threshold: 0.6 (up from 0.5) to be less sensitive to background noise/echo
+    # min_silence_duration: 0.2s (can adjust as needed)
+    session = AgentSession(
+        vad=silero.VAD.load(
+            min_speech_duration=0.2,
+            min_silence_duration=0.2,
+            activation_threshold=0.6,
+        ),
+        stt=stt,
+        llm=llm,
+        tts=tts
+    )
 
     # Start Whispey session tracking with metadata
     session_id = None
