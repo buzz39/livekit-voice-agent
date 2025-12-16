@@ -1,7 +1,7 @@
 import React from 'react';
-import { Activity, Phone, Database, LayoutDashboard } from 'lucide-react';
+import { Activity, Phone, Database, LayoutDashboard, Settings } from 'lucide-react';
 
-const DashboardLayout = ({ children }) => {
+const DashboardLayout = ({ children, activeTab = 'command-center', onTabChange }) => {
   return (
     <div className="flex h-screen bg-slate-950 text-white overflow-hidden">
       {/* Sidebar */}
@@ -12,9 +12,30 @@ const DashboardLayout = ({ children }) => {
         </div>
 
         <nav className="flex-1 p-4 space-y-2">
-          <NavItem icon={<LayoutDashboard />} label="Command Center" active />
-          <NavItem icon={<Phone />} label="Call Logs" />
-          <NavItem icon={<Database />} label="Database" />
+          <NavItem
+            icon={<LayoutDashboard />}
+            label="Command Center"
+            active={activeTab === 'command-center'}
+            onClick={() => onTabChange && onTabChange('command-center')}
+          />
+          <NavItem
+            icon={<Phone />}
+            label="Call Logs"
+            active={activeTab === 'call-logs'}
+            onClick={() => onTabChange && onTabChange('call-logs')}
+          />
+          <NavItem
+            icon={<Database />}
+            label="Database"
+            active={activeTab === 'database'}
+            onClick={() => onTabChange && onTabChange('database')}
+          />
+          <NavItem
+            icon={<Settings />}
+            label="Settings"
+            active={activeTab === 'settings'}
+            onClick={() => onTabChange && onTabChange('settings')}
+          />
         </nav>
 
         <div className="p-4 border-t border-slate-800">
@@ -40,9 +61,12 @@ const DashboardLayout = ({ children }) => {
   );
 };
 
-const NavItem = ({ icon, label, active }) => {
+const NavItem = ({ icon, label, active, onClick }) => {
   return (
-    <div className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors ${active ? 'bg-indigo-500/10 text-indigo-400' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'}`}>
+    <div
+      onClick={onClick}
+      className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors ${active ? 'bg-indigo-500/10 text-indigo-400' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'}`}
+    >
       {React.cloneElement(icon, { size: 20 })}
       <span className="hidden md:block font-medium">{label}</span>
     </div>

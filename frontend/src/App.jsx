@@ -8,12 +8,12 @@ import PromptPanel from './components/dashboard/PromptPanel';
 import { getStats, getRecentCalls, startOutboundCall } from './api';
 
 function App() {
+  const [currentView, setCurrentView] = useState('command-center');
   const [callStatus, setCallStatus] = useState('idle'); // idle, connecting, active, ended
   const [logs, setLogs] = useState([]);
   const [stats, setStats] = useState(null);
   const [recentCalls, setRecentCalls] = useState([]);
   const [riskLevel, setRiskLevel] = useState('low');
-  const [activeTab, setActiveTab] = useState('calls'); // 'calls' or 'prompt'
 
   // Fetch stats and recent calls on mount
   useEffect(() => {
@@ -128,110 +128,106 @@ function App() {
   };
 
   return (
-    <DashboardLayout>
-      <div className="grid grid-cols-12 gap-6 h-[calc(100vh-6rem)]">
-        {/* Top Row: Stats */}
-        <div className="col-span-12 grid grid-cols-1 md:grid-cols-4 gap-6 h-32 md:h-40">
-          <StatsCard
-            title="Total Calls"
-            value={stats ? stats.total_calls : "..."}
-            subtext={stats ? "Last 7 days" : "Loading..."}
-            chartColor="#10b981"
-          />
-          <StatsCard
-            title="Avg Duration"
-            value={stats ? formatDuration(stats.avg_duration) : "..."}
-            subtext={stats ? "Last 7 days" : "Loading..."}
-            chartColor="#6366f1"
-          />
-          <StatsCard
-            title="Emails Captured"
-            value={stats ? stats.emails_captured : "..."}
-            subtext={stats ? "Last 7 days" : "Loading..."}
-            chartColor="#f59e0b"
-          />
-          <div className="bg-slate-900 border border-slate-800 rounded-lg p-5 flex flex-col justify-center items-center h-full">
-            <div className="text-slate-400 text-sm font-medium uppercase tracking-wider mb-2">Current Risk Level</div>
-            <RiskBadge level={riskLevel} />
+    <DashboardLayout activeTab={currentView} onTabChange={setCurrentView}>
+      {currentView === 'command-center' && (
+        <div className="grid grid-cols-12 gap-6 h-[calc(100vh-6rem)]">
+          {/* Top Row: Stats */}
+          <div className="col-span-12 grid grid-cols-1 md:grid-cols-4 gap-6 h-32 md:h-40">
+            <StatsCard
+              title="Total Calls"
+              value={stats ? stats.total_calls : "..."}
+              subtext={stats ? "Last 7 days" : "Loading..."}
+              chartColor="#10b981"
+            />
+            <StatsCard
+              title="Avg Duration"
+              value={stats ? formatDuration(stats.avg_duration) : "..."}
+              subtext={stats ? "Last 7 days" : "Loading..."}
+              chartColor="#6366f1"
+            />
+            <StatsCard
+              title="Emails Captured"
+              value={stats ? stats.emails_captured : "..."}
+              subtext={stats ? "Last 7 days" : "Loading..."}
+              chartColor="#f59e0b"
+            />
+            <div className="bg-slate-900 border border-slate-800 rounded-lg p-5 flex flex-col justify-center items-center h-full">
+              <div className="text-slate-400 text-sm font-medium uppercase tracking-wider mb-2">Current Risk Level</div>
+              <RiskBadge level={riskLevel} />
+            </div>
+          </div>
+
+          {/* Middle Row: Main Content */}
+          <div className="col-span-12 md:col-span-8 h-full flex flex-col gap-6" style={{ height: 'calc(100% - 11rem)' }}>
+            {/* Terminal takes up most space */}
+            <div className="flex-1 min-h-0">
+              <Terminal logs={logs} />
+            </div>
+          </div>
+
+          {/* Right Column: Controls & Details */}
+          <div className="col-span-12 md:col-span-4 h-full flex flex-col gap-6" style={{ height: 'calc(100% - 11rem)' }}>
+              <div className="flex-shrink-0">
+                  <ActiveCallPanel
+                      status={callStatus}
+                      onStartCall={handleStartCall}
+                      onEndCall={handleEndCall}
+                  />
+              </div>
+
+              <div className="flex-1 bg-slate-900 border border-slate-800 rounded-lg p-6 overflow-y-auto min-h-0">
+                  <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-4">Recent Calls</h3>
+                  <div className="space-y-4">
+                      {recentCalls.map((call) => (
+                          <div key={call.id} className="p-3 bg-slate-800 rounded border border-slate-700">
+                              <div className="flex justify-between items-start mb-1">
+                                  <div className="font-medium text-white text-sm">{call.phone_number || 'Unknown'}</div>
+                                  <div className={`text-xs px-2 py-0.5 rounded ${call.call_status === 'completed' ? 'bg-emerald-900 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
+                                      {call.call_status}
+                                  </div>
+                              </div>
+                              <div className="flex justify-between text-xs text-slate-400">
+                                  <span>{call.business_name || 'No Business'}</span>
+                                  <span>{call.duration_seconds ? `${call.duration_seconds}s` : '-'}</span>
+                              </div>
+                              <div className="text-xs text-slate-500 mt-1">
+                                  {call.created_at ? new Date(call.created_at).toLocaleString() : ''}
+                              </div>
+                              {call.recording_url && (
+                                  <div className="mt-2">
+                                      <audio controls src={call.recording_url} className="w-full h-8" />
+                                  </div>
+                              )}
+                          </div>
+                      ))}
+                      {recentCalls.length === 0 && (
+                          <div className="text-center text-slate-500 text-sm py-4">
+                              No recent calls found.
+                          </div>
+                      )}
+                  </div>
+              </div>
           </div>
         </div>
+      )}
 
-        {/* Middle Row: Main Content */}
-        <div className="col-span-12 md:col-span-8 h-full flex flex-col gap-6" style={{ height: 'calc(100% - 11rem)' }}>
-           {/* Terminal takes up most space */}
-           <div className="flex-1 min-h-0">
-             <Terminal logs={logs} />
-           </div>
+      {currentView === 'settings' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-[calc(100vh-6rem)]">
+          <div className="h-full">
+             <PromptPanel />
+          </div>
+          {/* Placeholder for future settings */}
+          <div className="bg-slate-900 border border-slate-800 rounded-lg p-6 flex items-center justify-center text-slate-500">
+            More settings coming soon...
+          </div>
         </div>
+      )}
 
-        {/* Right Column: Controls & Details */}
-        <div className="col-span-12 md:col-span-4 h-full flex flex-col gap-6" style={{ height: 'calc(100% - 11rem)' }}>
-            <div className="flex-shrink-0">
-                <ActiveCallPanel
-                    status={callStatus}
-                    onStartCall={handleStartCall}
-                    onEndCall={handleEndCall}
-                />
-            </div>
-
-            {/* Tabbed Content */}
-            <div className="flex-1 flex flex-col min-h-0">
-                <div className="flex border-b border-slate-800 mb-0">
-                    <button
-                        className={`px-4 py-2 text-sm font-medium ${activeTab === 'calls' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-slate-400 hover:text-slate-200'}`}
-                        onClick={() => setActiveTab('calls')}
-                    >
-                        Recent Calls
-                    </button>
-                    <button
-                        className={`px-4 py-2 text-sm font-medium ${activeTab === 'prompt' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-slate-400 hover:text-slate-200'}`}
-                        onClick={() => setActiveTab('prompt')}
-                    >
-                        Prompt Settings
-                    </button>
-                </div>
-
-                {activeTab === 'calls' ? (
-                    <div className="flex-1 bg-slate-900 border border-slate-800 border-t-0 rounded-b-lg p-6 overflow-y-auto min-h-0">
-                        {/* <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-4">Recent Calls</h3> */}
-                        <div className="space-y-4">
-                            {recentCalls.map((call) => (
-                                <div key={call.id} className="p-3 bg-slate-800 rounded border border-slate-700">
-                                    <div className="flex justify-between items-start mb-1">
-                                        <div className="font-medium text-white text-sm">{call.phone_number || 'Unknown'}</div>
-                                        <div className={`text-xs px-2 py-0.5 rounded ${call.call_status === 'completed' ? 'bg-emerald-900 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
-                                            {call.call_status}
-                                        </div>
-                                    </div>
-                                    <div className="flex justify-between text-xs text-slate-400">
-                                        <span>{call.business_name || 'No Business'}</span>
-                                        <span>{call.duration_seconds ? `${call.duration_seconds}s` : '-'}</span>
-                                    </div>
-                                    <div className="text-xs text-slate-500 mt-1">
-                                        {call.created_at ? new Date(call.created_at).toLocaleString() : ''}
-                                    </div>
-                                    {call.recording_url && (
-                                        <div className="mt-2">
-                                            <audio controls src={call.recording_url} className="w-full h-8" />
-                                        </div>
-                                    )}
-                                </div>
-                            ))}
-                            {recentCalls.length === 0 && (
-                                <div className="text-center text-slate-500 text-sm py-4">
-                                    No recent calls found.
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                ) : (
-                    <div className="flex-1 min-h-0">
-                        <PromptPanel />
-                    </div>
-                )}
-            </div>
+      {(currentView === 'call-logs' || currentView === 'database') && (
+        <div className="flex items-center justify-center h-full text-slate-500">
+          Work in progress...
         </div>
-      </div>
+      )}
     </DashboardLayout>
   );
 }
