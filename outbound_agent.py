@@ -26,8 +26,18 @@ from outbound.tools import create_tools
 from outbound.recording import start_recording
 from outbound.lifecycle import finalize_call as finalize_call_logic
 
+# Whispey Observability Integration
+try:
+    from whispey import LivekitObserve
+    WHISPEY_ENABLED = True
+except ImportError:
+    WHISPEY_ENABLED = False
+
 load_dotenv()
 logger = logging.getLogger("outbound-agent")
+
+if not WHISPEY_ENABLED:
+    logger.warning("Whispey not installed. Install with: pip install whispey")
 
 async def entrypoint(ctx: JobContext):
     """Main entry point for the outbound voice agent."""
@@ -94,6 +104,31 @@ async def entrypoint(ctx: JobContext):
     # AI Config
     ai_config = await load_ai_config(db, agent_slug)
 
+    # Initialize Whispey observability if enabled
+    whispey = None
+    if WHISPEY_ENABLED:
+        whispey_api_key = os.getenv("WHISPEY_API_KEY")
+        whispey_agent_id = os.getenv("WHISPEY_OUTBOUND_AGENT_ID", os.getenv("WHISPEY_AGENT_ID", "outbound-agent"))
+        whispey_base_url = os.getenv("WHISPEY_BASE_URL")  # Optional self-hosted URL
+
+        if whispey_api_key:
+            try:
+                # Add base_url if present
+                if whispey_base_url:
+                    whispey = LivekitObserve(
+                        agent_id=whispey_agent_id,
+                        apikey=whispey_api_key,
+                        base_url=whispey_base_url)
+                else:
+                    whispey = LivekitObserve(agent_id=whispey_agent_id,
+                        apikey=whispey_api_key)
+
+                logger.info(f"Whispey observability enabled for agent: {whispey_agent_id}")
+            except Exception as e:
+                logger.error(f"Failed to initialize Whispey: {e}")
+        else:
+            logger.warning("WHISPEY_API_KEY not set, observability disabled")
+
     # 4. Initialize Agent Components
 
     # We need a forward declaration or a wrapper for finalize_call because it's used in event listeners
@@ -109,8 +144,17 @@ async def entrypoint(ctx: JobContext):
         if 'finalize_call' in locals():
             await finalize_call()
 
+        # Disconnect agent first to avoid race conditions/panics during room deletion
+        try:
+            await ctx.room.disconnect()
+            logger.info("Agent disconnected from room")
+        except Exception as e:
+            logger.warning(f"Failed to disconnect agent: {e}")
+
         # Explicitly delete the room to ensure SIP call ends
         try:
+            # Short delay to allow disconnect to propagate
+            await asyncio.sleep(0.5)
             await ctx.api.room.delete_room(api.DeleteRoomRequest(room=ctx.room.name))
             logger.info(f"Deleted room {ctx.room.name}")
         except Exception as e:
@@ -141,6 +185,20 @@ async def entrypoint(ctx: JobContext):
         tts = openai.TTS(model="tts-1", voice="alloy")
 
     session = AgentSession(vad=silero.VAD.load(), stt=stt, llm=llm, tts=tts)
+
+    # Start Whispey session tracking with metadata
+    session_id = None
+    if whispey:
+        try:
+            session_id = whispey.start_session(
+                session=session,
+                phone_number=phone_number,
+                business_name=business_name
+            )
+            logger.info(f"Whispey session started: {session_id}")
+        except Exception as e:
+            logger.error(f"Failed to start Whispey session: {e}")
+
 
     # 5. Start Session ASYNCHRONOUSLY (Critical for latency)
     session_start_task = asyncio.create_task(session.start(agent=agent, room=ctx.room))
@@ -206,6 +264,18 @@ async def entrypoint(ctx: JobContext):
             prompt_id=prompt_id,
             is_finalized=False # We already checked above, but passing False lets it run.
         )
+
+    # Register Whispey shutdown callback
+    if whispey and session_id:
+        async def whispey_shutdown():
+            try:
+                await whispey.export(session_id)
+                logger.info(f"Whispey data exported for session: {session_id}")
+            except Exception as e:
+                logger.error(f"Failed to export Whispey data: {e}")
+
+        # ctx.add_shutdown_callback is available in LiveKit agents
+        ctx.add_shutdown_callback(whispey_shutdown)
 
     # Create a shutdown event to keep the process alive
     shutdown_event = asyncio.Event()
