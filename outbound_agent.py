@@ -104,12 +104,6 @@ async def entrypoint(ctx: JobContext):
 
     async def hangup_call():
         """End the call for all participants by deleting the room."""
-        try:
-            await ctx.room.disconnect()
-            logger.info(f"Disconnected from room {ctx.room.name}")
-        except Exception as e:
-            logger.error(f"Failed to disconnect room: {e}")
-
         # Trigger finalize manually just in case event didn't fire (robustness)
         # We await it to ensure data is persisted before the process potentially exits or context is lost.
         if 'finalize_call' in locals():
