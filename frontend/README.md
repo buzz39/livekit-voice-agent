@@ -52,7 +52,7 @@ The frontend is a Single Page Application (SPA) built with React and Vite. It pr
 
 ## Configuration
 
-The API client is configured in `src/api.js`. currently, it defaults to `http://localhost:8000` for the backend URL.
+The API client is configured in `src/api.js`. Currently, it is configured to point to `https://livekit-outbound-api.tinysaas.fun` for the backend URL.
 
 To change the backend URL, update the `API_BASE_URL` constant in `src/api.js`.
 
