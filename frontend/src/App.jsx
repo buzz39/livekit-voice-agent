@@ -4,6 +4,7 @@ import Terminal from './components/dashboard/Terminal';
 import StatsCard from './components/dashboard/StatsCard';
 import RiskBadge from './components/dashboard/RiskBadge';
 import ActiveCallPanel from './components/dashboard/ActiveCallPanel';
+import PromptPanel from './components/dashboard/PromptPanel';
 import { getStats, getRecentCalls, startOutboundCall } from './api';
 
 function App() {
@@ -12,6 +13,7 @@ function App() {
   const [stats, setStats] = useState(null);
   const [recentCalls, setRecentCalls] = useState([]);
   const [riskLevel, setRiskLevel] = useState('low');
+  const [activeTab, setActiveTab] = useState('calls'); // 'calls' or 'prompt'
 
   // Fetch stats and recent calls on mount
   useEffect(() => {
@@ -172,37 +174,61 @@ function App() {
                 />
             </div>
 
-            <div className="flex-1 bg-slate-900 border border-slate-800 rounded-lg p-6 overflow-y-auto min-h-0">
-                <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-4">Recent Calls</h3>
-                <div className="space-y-4">
-                    {recentCalls.map((call) => (
-                        <div key={call.id} className="p-3 bg-slate-800 rounded border border-slate-700">
-                            <div className="flex justify-between items-start mb-1">
-                                <div className="font-medium text-white text-sm">{call.phone_number || 'Unknown'}</div>
-                                <div className={`text-xs px-2 py-0.5 rounded ${call.call_status === 'completed' ? 'bg-emerald-900 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
-                                    {call.call_status}
+            {/* Tabbed Content */}
+            <div className="flex-1 flex flex-col min-h-0">
+                <div className="flex border-b border-slate-800 mb-0">
+                    <button
+                        className={`px-4 py-2 text-sm font-medium ${activeTab === 'calls' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-slate-400 hover:text-slate-200'}`}
+                        onClick={() => setActiveTab('calls')}
+                    >
+                        Recent Calls
+                    </button>
+                    <button
+                        className={`px-4 py-2 text-sm font-medium ${activeTab === 'prompt' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-slate-400 hover:text-slate-200'}`}
+                        onClick={() => setActiveTab('prompt')}
+                    >
+                        Prompt Settings
+                    </button>
+                </div>
+
+                {activeTab === 'calls' ? (
+                    <div className="flex-1 bg-slate-900 border border-slate-800 border-t-0 rounded-b-lg p-6 overflow-y-auto min-h-0">
+                        {/* <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-4">Recent Calls</h3> */}
+                        <div className="space-y-4">
+                            {recentCalls.map((call) => (
+                                <div key={call.id} className="p-3 bg-slate-800 rounded border border-slate-700">
+                                    <div className="flex justify-between items-start mb-1">
+                                        <div className="font-medium text-white text-sm">{call.phone_number || 'Unknown'}</div>
+                                        <div className={`text-xs px-2 py-0.5 rounded ${call.call_status === 'completed' ? 'bg-emerald-900 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
+                                            {call.call_status}
+                                        </div>
+                                    </div>
+                                    <div className="flex justify-between text-xs text-slate-400">
+                                        <span>{call.business_name || 'No Business'}</span>
+                                        <span>{call.duration_seconds ? `${call.duration_seconds}s` : '-'}</span>
+                                    </div>
+                                    <div className="text-xs text-slate-500 mt-1">
+                                        {call.created_at ? new Date(call.created_at).toLocaleString() : ''}
+                                    </div>
+                                    {call.recording_url && (
+                                        <div className="mt-2">
+                                            <audio controls src={call.recording_url} className="w-full h-8" />
+                                        </div>
+                                    )}
                                 </div>
-                            </div>
-                            <div className="flex justify-between text-xs text-slate-400">
-                                <span>{call.business_name || 'No Business'}</span>
-                                <span>{call.duration_seconds ? `${call.duration_seconds}s` : '-'}</span>
-                            </div>
-                            <div className="text-xs text-slate-500 mt-1">
-                                {call.created_at ? new Date(call.created_at).toLocaleString() : ''}
-                            </div>
-                            {call.recording_url && (
-                                <div className="mt-2">
-                                    <audio controls src={call.recording_url} className="w-full h-8" />
+                            ))}
+                            {recentCalls.length === 0 && (
+                                <div className="text-center text-slate-500 text-sm py-4">
+                                    No recent calls found.
                                 </div>
                             )}
                         </div>
-                    ))}
-                    {recentCalls.length === 0 && (
-                        <div className="text-center text-slate-500 text-sm py-4">
-                            No recent calls found.
-                        </div>
-                    )}
-                </div>
+                    </div>
+                ) : (
+                    <div className="flex-1 min-h-0">
+                        <PromptPanel />
+                    </div>
+                )}
             </div>
         </div>
       </div>

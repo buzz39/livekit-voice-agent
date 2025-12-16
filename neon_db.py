@@ -53,6 +53,26 @@ class NeonDB:
             )
             return row["content"] if row else None
     
+    async def update_active_prompt(self, name: str, content: str):
+        """Update active prompt content."""
+        async with self.pool.acquire() as conn:
+            # Check if updated_at column exists in prompts table, if not, skip it.
+            # Assuming it exists based on other tables or just try-catch.
+            # Standard practice is it exists.
+            try:
+                await conn.execute("""
+                    UPDATE prompts
+                    SET content = $2, updated_at = NOW()
+                    WHERE name = $1 AND is_active = true
+                """, name, content)
+            except asyncpg.UndefinedColumnError:
+                # Fallback if updated_at doesn't exist
+                await conn.execute("""
+                    UPDATE prompts
+                    SET content = $2
+                    WHERE name = $1 AND is_active = true
+                """, name, content)
+
     async def upsert_contact(
         self,
         phone_number: str,
