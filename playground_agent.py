@@ -47,7 +47,7 @@ class PlaygroundAgent:
         # Extract metadata or use defaults
         initial_metadata = extract_metadata(self.ctx)
         self.phone_number, self.business_name, self.agent_slug = get_required_fields(initial_metadata)
-
+        
         # Override phone number for playground
         if self.phone_number == "LOCAL_TEST_NUMBER":
              self.phone_number = "PLAYGROUND_USER"
@@ -58,7 +58,7 @@ class PlaygroundAgent:
             # Setup DB and Config
             logger.info("Connecting to database...")
             self.db = await get_db()
-
+            
             logger.info(f"Loading config for {self.agent_slug}...")
             agent_config, schema_fields, dispatcher, self.agent_slug = await load_agent_config(self.db, self.agent_slug)
 
@@ -85,14 +85,14 @@ class PlaygroundAgent:
 
             # Egress Manager
             egress_manager = EgressManager(self.ctx.api)
-
+            
             # Tools
             async def hangup_callback():
                 logger.info("Hangup callback triggered")
                 await self.finalize_call(dispatcher, egress_manager)
-                # In playground, deleting the room kicks everyone out.
+                # In playground, deleting the room kicks everyone out. 
                 # Disconnect is softer if we want to stay in room, but for "end call" simulation, delete/disconnect is fine.
-                await self.ctx.room.disconnect()
+                await self.ctx.room.disconnect() 
 
             all_tools = create_tools(
                 call_metadata=self.call_metadata,
@@ -108,7 +108,7 @@ class PlaygroundAgent:
 
             # Construct Agent
             agent = Agent(instructions=agent_instructions, tools=all_tools)
-
+            
             llm = openai.LLM(model=ai_config.get("llm_model", "gpt-4o-mini"))
             stt = deepgram.STT(model=ai_config.get("stt_model", "nova-3"), language=ai_config.get("stt_language", "en-US"))
 
@@ -129,7 +129,7 @@ class PlaygroundAgent:
             # Start Session (CRITICAL: AWAIT THIS)
             logger.info("Starting Agent Session...")
             session_task = asyncio.create_task(self.session.start(agent=agent, room=self.ctx.room))
-
+            
             # Give session a moment to initialize
             await asyncio.sleep(0.5)
 
@@ -138,7 +138,7 @@ class PlaygroundAgent:
             if opening_line:
                 if "{business_name}" in opening_line:
                     opening_line = opening_line.format(business_name=self.business_name)
-
+                
                 logger.info(f"Saying opening line: {opening_line}")
                 await self.session.say(opening_line, allow_interruptions=True)
 
@@ -159,13 +159,13 @@ class PlaygroundAgent:
             # Keep alive
             logger.info("Agent loop running...")
             self.shutdown_event = asyncio.Event()
-
+            
             # Wait for the session task or shutdown
             done, pending = await asyncio.wait(
                 [session_task, asyncio.create_task(self.shutdown_event.wait())],
                 return_when=asyncio.FIRST_COMPLETED
             )
-
+            
             # If session task finished (e.g. error or close), verify
             for task in done:
                 if task == session_task:
@@ -188,7 +188,7 @@ class PlaygroundAgent:
             return
         self.is_finalized = True
         logger.info("Finalizing call...")
-
+        
         await finalize_call_logic(
             ctx=self.ctx,
             db=self.db,
@@ -199,7 +199,7 @@ class PlaygroundAgent:
             call_metadata=self.call_metadata,
             contact_id=self.contact_id,
             prompt_id=self.prompt_id,
-            is_finalized=False
+            is_finalized=False 
         )
         if hasattr(self, 'shutdown_event'):
             self.shutdown_event.set()
