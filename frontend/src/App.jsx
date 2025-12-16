@@ -5,6 +5,7 @@ import StatsCard from './components/dashboard/StatsCard';
 import RiskBadge from './components/dashboard/RiskBadge';
 import ActiveCallPanel from './components/dashboard/ActiveCallPanel';
 import PromptPanel from './components/dashboard/PromptPanel';
+import CallLogs from './components/dashboard/CallLogs';
 import { getStats, getRecentCalls, startOutboundCall } from './api';
 
 function App() {
@@ -223,7 +224,11 @@ function App() {
         </div>
       )}
 
-      {(currentView === 'call-logs' || currentView === 'database') && (
+      {currentView === 'call-logs' && (
+        <CallLogs />
+      )}
+
+      {currentView === 'database' && (
         <div className="flex items-center justify-center h-full text-slate-500">
           Work in progress...
         </div>
