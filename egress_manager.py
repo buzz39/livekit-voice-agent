@@ -42,7 +42,7 @@ class EgressManager:
             valid_s3 = False
             # Ensure critical S3 fields are present and non-empty
             if s3_options and s3_options.get("access_key") and s3_options.get("bucket") and s3_options.get("secret"):
-                logger.info("Configuring S3 upload for egress")
+                logger.info(f"Configuring S3 upload for egress (Bucket: {s3_options.get('bucket')})")
                 s3_upload = S3Upload(
                     access_key=s3_options.get("access_key"),
                     secret=s3_options.get("secret"),

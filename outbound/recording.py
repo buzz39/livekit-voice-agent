@@ -37,9 +37,10 @@ async def start_recording(
             "endpoint": os.getenv("S3_ENDPOINT", "")
         }
 
-    # START EGRESS IN BACKGROUND to avoid blocking the greeting
-    # We assign the recording_id later in the callback or just trust the mananger logs
-    async def _start_recording_bg():
+    # START EGRESS DIRECTLY
+    # We await the API call to ensure the recording request is accepted by the server.
+    # This prevents race conditions where the task might be GC'd or fail silently.
+    try:
         rec_id, rec_url = await egress_manager.start_room_composite_egress(
             ctx.room.name,
             s3_options=s3_options
@@ -58,5 +59,7 @@ async def start_recording(
                 })
             except Exception as e:
                 logger.debug(f"recording.started webhook error: {e}")
-
-    asyncio.create_task(_start_recording_bg()) # <--- Non-blocking!
+        else:
+             logger.warning("Egress manager returned no recording ID. Recording likely failed to start.")
+    except Exception as e:
+        logger.error(f"Failed to start egress recording: {e}")
