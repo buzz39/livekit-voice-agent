@@ -159,6 +159,19 @@ async def get_dashboard_stats():
         logger.error(f"Error fetching stats: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+@app.get("/dashboard/analytics/volume")
+async def get_analytics_volume(days: int = 30):
+    """Get daily call volume for analytics."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    try:
+        data = await db_instance.get_daily_call_volume(days=days)
+        return data
+    except Exception as e:
+        logger.error(f"Error fetching analytics volume: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 @app.get("/dashboard/prompts")
 async def get_all_prompts():
     """Get all available prompts."""

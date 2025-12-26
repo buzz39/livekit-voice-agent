@@ -265,6 +265,23 @@ class NeonDB:
             """, days)
             return dict(stats) if stats else {}
 
+    async def get_daily_call_volume(self, days: int = 30) -> List[Dict[str, Any]]:
+        """Get daily call volume for the last N days."""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT
+                    to_char(created_at, 'YYYY-MM-DD') as date,
+                    COUNT(*) as count,
+                    AVG(duration_seconds) as avg_duration,
+                    COUNT(CASE WHEN call_status = 'completed' THEN 1 END) as completed,
+                     COUNT(CASE WHEN call_status = 'failed' THEN 1 END) as failed
+                FROM calls
+                WHERE created_at > NOW() - make_interval(days := $1)
+                GROUP BY 1
+                ORDER BY 1 ASC
+            """, days)
+            return [dict(row) for row in rows]
+
     async def get_recent_calls(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Fetch recent calls with contact details."""
         async with self.pool.acquire() as conn:

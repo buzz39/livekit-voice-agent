@@ -1,5 +1,5 @@
 import React from 'react';
-import { Activity, Phone, Database, LayoutDashboard, Settings } from 'lucide-react';
+import { Activity, Phone, Database, LayoutDashboard, Settings, BarChart } from 'lucide-react';
 
 const DashboardLayout = ({ children, activeTab = 'command-center', onTabChange }) => {
   return (
@@ -17,6 +17,12 @@ const DashboardLayout = ({ children, activeTab = 'command-center', onTabChange }
             label="Command Center"
             active={activeTab === 'command-center'}
             onClick={() => onTabChange && onTabChange('command-center')}
+          />
+          <NavItem
+            icon={<BarChart />}
+            label="Analytics"
+            active={activeTab === 'analytics'}
+            onClick={() => onTabChange && onTabChange('analytics')}
           />
           <NavItem
             icon={<Phone />}

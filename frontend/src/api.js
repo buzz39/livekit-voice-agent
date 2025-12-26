@@ -15,6 +15,19 @@ export async function getStats() {
   }
 }
 
+export async function getAnalyticsVolume(days = 30) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/dashboard/analytics/volume?days=${days}`);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return await response.json();
+  } catch (error) {
+    console.error("Failed to fetch analytics:", error);
+    return [];
+  }
+}
+
 export async function getRecentCalls(limit = 10) {
   try {
     const response = await fetch(`${API_BASE_URL}/dashboard/calls?limit=${limit}`);
@@ -36,44 +49,44 @@ export async function getRecentCalls(limit = 10) {
 
 // Get all prompts
 export const getAllPrompts = async () => {
-    try {
-        const response = await fetch(`${API_BASE_URL}/dashboard/prompts`);
-        if (!response.ok) throw new Error('Failed to fetch prompts');
-        return await response.json();
-    } catch (error) {
-        console.error('Error fetching prompts:', error);
-        return [];
-    }
+  try {
+    const response = await fetch(`${API_BASE_URL}/dashboard/prompts`);
+    if (!response.ok) throw new Error('Failed to fetch prompts');
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching prompts:', error);
+    return [];
+  }
 };
 
 // Get active prompt
 export const getActivePrompt = async (name = "default_roofing_agent") => {
-    try {
-        const response = await fetch(`${API_BASE_URL}/dashboard/prompt?name=${name}`);
-        if (!response.ok) throw new Error('Failed to fetch prompt');
-        return await response.json();
-    } catch (error) {
-        console.error('Error fetching prompt:', error);
-        return null;
-    }
+  try {
+    const response = await fetch(`${API_BASE_URL}/dashboard/prompt?name=${name}`);
+    if (!response.ok) throw new Error('Failed to fetch prompt');
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching prompt:', error);
+    return null;
+  }
 };
 
 // Update active prompt
 export const updateActivePrompt = async (content, name = "default_roofing_agent") => {
-    try {
-        const response = await fetch(`${API_BASE_URL}/dashboard/prompt`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ name, content }),
-        });
-        if (!response.ok) throw new Error('Failed to update prompt');
-        return await response.json();
-    } catch (error) {
-        console.error('Error updating prompt:', error);
-        throw error;
-    }
+  try {
+    const response = await fetch(`${API_BASE_URL}/dashboard/prompt`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name, content }),
+    });
+    if (!response.ok) throw new Error('Failed to update prompt');
+    return await response.json();
+  } catch (error) {
+    console.error('Error updating prompt:', error);
+    throw error;
+  }
 };
 
 export async function getCallDetails(callId) {

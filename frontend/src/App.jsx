@@ -6,6 +6,7 @@ import RiskBadge from './components/dashboard/RiskBadge';
 import ActiveCallPanel from './components/dashboard/ActiveCallPanel';
 import PromptPanel from './components/dashboard/PromptPanel';
 import CallLogs from './components/dashboard/CallLogs';
+import Analytics from './components/dashboard/Analytics';
 import { getStats, getRecentCalls, startOutboundCall } from './api';
 
 function App() {
@@ -34,49 +35,49 @@ function App() {
   // Poll for active call updates
   useEffect(() => {
     if (callStatus === 'active' || callStatus === 'connecting') {
-        // If we don't have a call ID yet, we might need one.
-        // For this demo, let's assume we are watching the *latest* call if we just started one.
-        // In a real app, startOutboundCall should return the call ID.
-        // Since startOutboundCall returns { data: request.model_dump() }, it doesn't give ID immediately because it's queued.
-        // But for the purpose of "Make it work with DB", let's assume we poll the *latest* call from DB
-        // and check if it's 'in-progress' or 'queued'.
+      // If we don't have a call ID yet, we might need one.
+      // For this demo, let's assume we are watching the *latest* call if we just started one.
+      // In a real app, startOutboundCall should return the call ID.
+      // Since startOutboundCall returns { data: request.model_dump() }, it doesn't give ID immediately because it's queued.
+      // But for the purpose of "Make it work with DB", let's assume we poll the *latest* call from DB
+      // and check if it's 'in-progress' or 'queued'.
 
-        const pollCall = async () => {
-             const calls = await getRecentCalls(1);
-             if (calls && calls.length > 0) {
-                 const latestCall = calls[0];
-                 // Update logs if we have a transcript
-                 if (latestCall.transcript) {
-                     try {
-                         const transcript = typeof latestCall.transcript === 'string'
-                            ? JSON.parse(latestCall.transcript)
-                            : latestCall.transcript;
+      const pollCall = async () => {
+        const calls = await getRecentCalls(1);
+        if (calls && calls.length > 0) {
+          const latestCall = calls[0];
+          // Update logs if we have a transcript
+          if (latestCall.transcript) {
+            try {
+              const transcript = typeof latestCall.transcript === 'string'
+                ? JSON.parse(latestCall.transcript)
+                : latestCall.transcript;
 
-                         // Map transcript to logs format
-                         const newLogs = transcript.map(entry => ({
-                             role: entry.role,
-                             text: entry.text,
-                             timestamp: new Date().toLocaleTimeString([], { hour12: false }) // Or use entry timestamp if available
-                         }));
-                         setLogs(newLogs);
-                     } catch (e) {
-                         console.error("Error parsing transcript", e);
-                     }
-                 }
+              // Map transcript to logs format
+              const newLogs = transcript.map(entry => ({
+                role: entry.role,
+                text: entry.text,
+                timestamp: new Date().toLocaleTimeString([], { hour12: false }) // Or use entry timestamp if available
+              }));
+              setLogs(newLogs);
+            } catch (e) {
+              console.error("Error parsing transcript", e);
+            }
+          }
 
-                 if (latestCall.interest_level) {
-                     // Map interest level to risk? Or use objection?
-                     // Vaani maps risk. Let's map interest level for now.
-                     // Hot -> Low Risk, Warm -> Medium, Cold -> High? Or vice versa depending on context (Debt collection: Hot = PTP = Low Risk)
-                     if (latestCall.interest_level === 'Hot') setRiskLevel('low');
-                     else if (latestCall.interest_level === 'Warm') setRiskLevel('medium');
-                     else setRiskLevel('high');
-                 }
-             }
-        };
+          if (latestCall.interest_level) {
+            // Map interest level to risk? Or use objection?
+            // Vaani maps risk. Let's map interest level for now.
+            // Hot -> Low Risk, Warm -> Medium, Cold -> High? Or vice versa depending on context (Debt collection: Hot = PTP = Low Risk)
+            if (latestCall.interest_level === 'Hot') setRiskLevel('low');
+            else if (latestCall.interest_level === 'Warm') setRiskLevel('medium');
+            else setRiskLevel('high');
+          }
+        }
+      };
 
-        const interval = setInterval(pollCall, 2000);
-        return () => clearInterval(interval);
+      const interval = setInterval(pollCall, 2000);
+      return () => clearInterval(interval);
     }
   }, [callStatus]);
 
@@ -122,10 +123,10 @@ function App() {
 
   // Helper to format duration
   const formatDuration = (seconds) => {
-      if (!seconds) return '0s';
-      const m = Math.floor(seconds / 60);
-      const s = Math.round(seconds % 60);
-      return `${m}m ${s}s`;
+    if (!seconds) return '0s';
+    const m = Math.floor(seconds / 60);
+    const s = Math.round(seconds % 60);
+    return `${m}m ${s}s`;
   };
 
   return (
@@ -168,46 +169,46 @@ function App() {
 
           {/* Right Column: Controls & Details */}
           <div className="col-span-12 md:col-span-4 h-full flex flex-col gap-6" style={{ height: 'calc(100% - 11rem)' }}>
-              <div className="flex-shrink-0">
-                  <ActiveCallPanel
-                      status={callStatus}
-                      onStartCall={handleStartCall}
-                      onEndCall={handleEndCall}
-                  />
-              </div>
+            <div className="flex-shrink-0">
+              <ActiveCallPanel
+                status={callStatus}
+                onStartCall={handleStartCall}
+                onEndCall={handleEndCall}
+              />
+            </div>
 
-              <div className="flex-1 bg-slate-900 border border-slate-800 rounded-lg p-6 overflow-y-auto min-h-0">
-                  <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-4">Recent Calls</h3>
-                  <div className="space-y-4">
-                      {recentCalls.map((call) => (
-                          <div key={call.id} className="p-3 bg-slate-800 rounded border border-slate-700">
-                              <div className="flex justify-between items-start mb-1">
-                                  <div className="font-medium text-white text-sm">{call.phone_number || 'Unknown'}</div>
-                                  <div className={`text-xs px-2 py-0.5 rounded ${call.call_status === 'completed' ? 'bg-emerald-900 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
-                                      {call.call_status}
-                                  </div>
-                              </div>
-                              <div className="flex justify-between text-xs text-slate-400">
-                                  <span>{call.business_name || 'No Business'}</span>
-                                  <span>{call.duration_seconds ? `${call.duration_seconds}s` : '-'}</span>
-                              </div>
-                              <div className="text-xs text-slate-500 mt-1">
-                                  {call.created_at ? new Date(call.created_at).toLocaleString() : ''}
-                              </div>
-                              {call.recording_url && (
-                                  <div className="mt-2">
-                                      <audio controls src={call.recording_url} className="w-full h-8" />
-                                  </div>
-                              )}
-                          </div>
-                      ))}
-                      {recentCalls.length === 0 && (
-                          <div className="text-center text-slate-500 text-sm py-4">
-                              No recent calls found.
-                          </div>
-                      )}
+            <div className="flex-1 bg-slate-900 border border-slate-800 rounded-lg p-6 overflow-y-auto min-h-0">
+              <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-4">Recent Calls</h3>
+              <div className="space-y-4">
+                {recentCalls.map((call) => (
+                  <div key={call.id} className="p-3 bg-slate-800 rounded border border-slate-700">
+                    <div className="flex justify-between items-start mb-1">
+                      <div className="font-medium text-white text-sm">{call.phone_number || 'Unknown'}</div>
+                      <div className={`text-xs px-2 py-0.5 rounded ${call.call_status === 'completed' ? 'bg-emerald-900 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
+                        {call.call_status}
+                      </div>
+                    </div>
+                    <div className="flex justify-between text-xs text-slate-400">
+                      <span>{call.business_name || 'No Business'}</span>
+                      <span>{call.duration_seconds ? `${call.duration_seconds}s` : '-'}</span>
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1">
+                      {call.created_at ? new Date(call.created_at).toLocaleString() : ''}
+                    </div>
+                    {call.recording_url && (
+                      <div className="mt-2">
+                        <audio controls src={call.recording_url} className="w-full h-8" />
+                      </div>
+                    )}
                   </div>
+                ))}
+                {recentCalls.length === 0 && (
+                  <div className="text-center text-slate-500 text-sm py-4">
+                    No recent calls found.
+                  </div>
+                )}
               </div>
+            </div>
           </div>
         </div>
       )}
@@ -215,7 +216,7 @@ function App() {
       {currentView === 'settings' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-[calc(100vh-6rem)]">
           <div className="h-full">
-             <PromptPanel />
+            <PromptPanel />
           </div>
           {/* Placeholder for future settings */}
           <div className="bg-slate-900 border border-slate-800 rounded-lg p-6 flex items-center justify-center text-slate-500">
@@ -226,6 +227,10 @@ function App() {
 
       {currentView === 'call-logs' && (
         <CallLogs />
+      )}
+
+      {currentView === 'analytics' && (
+        <Analytics />
       )}
 
       {currentView === 'database' && (
