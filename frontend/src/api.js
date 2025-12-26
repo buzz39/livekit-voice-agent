@@ -1,6 +1,6 @@
 // Frontend API Client
 
-const API_BASE_URL = 'https://livekit-outbound-api.tinysaas.fun';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://livekit-outbound-api.tinysaas.fun';
 
 export async function getStats() {
   try {
