@@ -85,6 +85,8 @@ LIVEKIT_API_KEY=<key>
 LIVEKIT_API_SECRET=<secret>
 DATABASE_URL=<neon-postgres-connection-string>
 N8N_WEBHOOK_URL=<n8n-endpoint>
+SARVAM_API_KEY=your_sarvam_api_key # Get from Sarvam AI dashboard
+TTS_PROVIDER=cartesia # or sarvam (defaults to cartesia)
 ```
 
 ## 📸 Screenshots

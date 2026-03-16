@@ -30,10 +30,45 @@ from livekit.agents.llm import function_tool
 from livekit.plugins import deepgram, openai, cartesia, silero
 from livekit import api
 from mcp_integration import load_mcp_tools
+import os
+import httpx
 from neon_db import get_db
 
 load_dotenv()
 logger = logging.getLogger("telephony-agent")
+
+SARVAM_API_URL = os.environ.get("SARVAM_API_URL", "https://api.sarvam.ai/v1/tts")
+SARVAM_VOICE_ID = os.environ.get("SARVAM_VOICE_ID", "saarika:v2.5") # Example: saarika:v2.5 (Hindi female)
+
+async def sarvam_tts(text: str, voice_id: str = SARVAM_VOICE_ID) -> bytes:
+    sarvam_api_key = os.environ.get("SARVAM_API_KEY")
+    if not sarvam_api_key:
+        logger.error("SARVAM_API_KEY not set")
+        raise ValueError("Sarvam AI API key not found.")
+    
+    headers = {
+        "Authorization": f"Bearer {sarvam_api_key}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "text": text,
+        "voice": voice_id,
+        "response_format": "pcm", # LiveKit expects raw audio
+        "sample_rate": 16000 # LiveKit expects 16kHz
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(SARVAM_API_URL, json=payload, headers=headers, timeout=10.0)
+            response.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
+            return response.content
+        except httpx.RequestError as exc:
+            logger.error(f"An error occurred while requesting Sarvam TTS: {exc}")
+            raise
+        except httpx.HTTPStatusError as exc:
+            logger.error(f"Sarvam TTS HTTP error for {exc.request.url}: {exc.response.status_code} - {exc.response.text}")
+            raise
+
 
 # Agent instructions will be loaded from Neon database
 AGENT_INSTRUCTIONS = None  # Will be fetched from database
@@ -279,22 +314,53 @@ async def entrypoint(ctx: JobContext):
         logger.warning(f"Unsupported STT provider: {ai_config['stt_provider']}, using Deepgram")
         stt = deepgram.STT(model="nova-3", language="en-US")
     
-    # Configure TTS based on database config
-    if ai_config["tts_provider"] == "cartesia":
+    # Configure TTS based on database config, with environment variable override
+    tts_provider_env = os.environ.get("TTS_PROVIDER", "").lower()
+    
+    # Prioritize environment variable if set and valid
+    if tts_provider_env == "sarvam":
+        logger.info(f"Using Sarvam TTS based on TTS_PROVIDER environment variable")
+        # For Sarvam, we'll use a custom function later in session.generate_reply
+        # For now, we'll set a placeholder or use openai for structure
+        tts = openai.TTS(model="tts-1", voice="alloy") # Placeholder, actual call will be custom
+        
+    elif tts_provider_env == "cartesia":
+        logger.info(f"Using Cartesia TTS based on TTS_PROVIDER environment variable")
         tts = cartesia.TTS(
             model=ai_config["tts_model"],
             voice=ai_config["tts_voice"],
             language=ai_config["tts_language"],
             speed=float(ai_config["tts_speed"]),
-            sample_rate=16000  # Changed from 24000 to 16000 for telephony compatibility
+            sample_rate=16000
+        )
+    elif tts_provider_env == "openai":
+        logger.info(f"Using OpenAI TTS based on TTS_PROVIDER environment variable")
+        tts = openai.TTS(
+            model=ai_config.get("tts_model", "tts-1"),
+            voice=ai_config.get("tts_voice", "alloy"),
+        )
+    # Fallback to database config if no valid env var is set
+    elif ai_config["tts_provider"] == "cartesia":
+        logger.info(f"Using Cartesia TTS based on database config")
+        tts = cartesia.TTS(
+            model=ai_config["tts_model"],
+            voice=ai_config["tts_voice"],
+            language=ai_config["tts_language"],
+            speed=float(ai_config["tts_speed"]),
+            sample_rate=16000
         )
     elif ai_config["tts_provider"] == "openai":
+        logger.info(f"Using OpenAI TTS based on database config")
         tts = openai.TTS(
-            model=ai_config.get("tts_model", "tts-1"),  # tts-1 or tts-1-hd
-            voice=ai_config.get("tts_voice", "alloy"),  # alloy, echo, fable, onyx, nova, shimmer
+            model=ai_config.get("tts_model", "tts-1"),
+            voice=ai_config.get("tts_voice", "alloy"),
         )
+    elif ai_config["tts_provider"] == "sarvam":
+        logger.info(f"Using Sarvam TTS based on database config")
+        # Placeholder, actual call will be custom
+        tts = openai.TTS(model="tts-1", voice="alloy")
     else:
-        logger.warning(f"Unsupported TTS provider: {ai_config['tts_provider']}, using OpenAI TTS")
+        logger.warning(f"Unsupported TTS provider: {ai_config['tts_provider']} or {tts_provider_env}, using OpenAI TTS as fallback")
         tts = openai.TTS(model="tts-1", voice="alloy")
     
     # Configure the voice processing pipeline optimized for telephony
@@ -306,6 +372,13 @@ async def entrypoint(ctx: JobContext):
         tts=tts
     )
     
+    # Override TTS generation for Sarvam if selected
+    if tts_provider_env == "sarvam" or ai_config["tts_provider"] == "sarvam":
+        async def sarvam_generate_speech(text: str) -> bytes:
+            return await sarvam_tts(text)
+        session._generate_speech = sarvam_generate_speech
+        logger.info("Overridden session._generate_speech for Sarvam TTS")
+
     # Track if call was ended by agent
     call_ended_by_agent = False
     
