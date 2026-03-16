@@ -343,6 +343,67 @@ async def get_call_details(call_id: int):
         logger.error(f"Error fetching call {call_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+@app.get("/dashboard/appointments")
+async def get_appointments():
+    """
+    Get scheduled appointments/callbacks booked during AI calls.
+    Returns mock data for now — replace with real DB query when appointments table exists.
+    """
+    from datetime import date, timedelta
+    today = date.today()
+    mock_appointments = [
+        {
+            "id": 1,
+            "lead_name": "Rajesh Sharma",
+            "phone": "+91-98201-12345",
+            "date": str(today),
+            "time": "10:00 AM",
+            "status": "confirmed"
+        },
+        {
+            "id": 2,
+            "lead_name": "Priya Mehta",
+            "phone": "+91-98765-43210",
+            "date": str(today),
+            "time": "2:30 PM",
+            "status": "pending"
+        },
+        {
+            "id": 3,
+            "lead_name": "Anil Kapoor",
+            "phone": "+91-90001-11111",
+            "date": str(today + timedelta(days=1)),
+            "time": "11:00 AM",
+            "status": "pending"
+        },
+        {
+            "id": 4,
+            "lead_name": "Sunita Verma",
+            "phone": "+91-77777-88888",
+            "date": str(today + timedelta(days=2)),
+            "time": "4:00 PM",
+            "status": "confirmed"
+        },
+        {
+            "id": 5,
+            "lead_name": "Deepak Joshi",
+            "phone": "+91-99999-00000",
+            "date": str(today - timedelta(days=1)),
+            "time": "9:00 AM",
+            "status": "done"
+        },
+        {
+            "id": 6,
+            "lead_name": "Kavita Singh",
+            "phone": "+91-88888-55555",
+            "date": str(today + timedelta(days=3)),
+            "time": "3:00 PM",
+            "status": "pending"
+        },
+    ]
+    return mock_appointments
+
+
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}

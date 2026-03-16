@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { SignIn, SignUp, useAuth } from '@clerk/clerk-react';
 import DashboardLayout from './components/layout/DashboardLayout';
 import Terminal from './components/dashboard/Terminal';
 import StatsCard from './components/dashboard/StatsCard';
@@ -7,17 +9,69 @@ import ActiveCallPanel from './components/dashboard/ActiveCallPanel';
 import PromptPanel from './components/dashboard/PromptPanel';
 import CallLogs from './components/dashboard/CallLogs';
 import Analytics from './components/dashboard/Analytics';
+import Calendar from './components/dashboard/Calendar';
+import LandingPage from './pages/LandingPage';
 import { getStats, getRecentCalls, startOutboundCall } from './api';
 
-function App() {
+// Protected route wrapper
+const ProtectedRoute = ({ children }) => {
+  const { isSignedIn, isLoaded } = useAuth();
+  if (!isLoaded) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="text-slate-400 text-sm animate-pulse">Loading...</div>
+      </div>
+    );
+  }
+  if (!isSignedIn) {
+    return <Navigate to="/sign-in" replace />;
+  }
+  return children;
+};
+
+// Clerk sign-in page wrapper
+const SignInPage = () => {
+  const { isSignedIn } = useAuth();
+  if (isSignedIn) return <Navigate to="/dashboard" replace />;
+  return (
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+      <div className="w-full max-w-md">
+        <div className="text-center mb-8">
+          <h1 className="text-2xl font-bold text-white">Welcome back</h1>
+          <p className="text-slate-400 text-sm mt-1">Sign in to your Aisha AI account</p>
+        </div>
+        <SignIn routing="path" path="/sign-in" afterSignInUrl="/dashboard" />
+      </div>
+    </div>
+  );
+};
+
+// Clerk sign-up page wrapper
+const SignUpPage = () => {
+  const { isSignedIn } = useAuth();
+  if (isSignedIn) return <Navigate to="/dashboard" replace />;
+  return (
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+      <div className="w-full max-w-md">
+        <div className="text-center mb-8">
+          <h1 className="text-2xl font-bold text-white">Get started free</h1>
+          <p className="text-slate-400 text-sm mt-1">Create your Aisha AI account</p>
+        </div>
+        <SignUp routing="path" path="/sign-up" afterSignUpUrl="/dashboard" />
+      </div>
+    </div>
+  );
+};
+
+// Main dashboard content
+function Dashboard() {
   const [currentView, setCurrentView] = useState('command-center');
-  const [callStatus, setCallStatus] = useState('idle'); // idle, connecting, active, ended
+  const [callStatus, setCallStatus] = useState('idle');
   const [logs, setLogs] = useState([]);
   const [stats, setStats] = useState(null);
   const [recentCalls, setRecentCalls] = useState([]);
   const [riskLevel, setRiskLevel] = useState('low');
 
-  // Fetch stats and recent calls on mount
   useEffect(() => {
     async function fetchData() {
       const statsData = await getStats();
@@ -27,55 +81,38 @@ function App() {
       if (callsData) setRecentCalls(callsData);
     }
     fetchData();
-    // Refresh every 30 seconds
     const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
   }, []);
 
-  // Poll for active call updates
   useEffect(() => {
     if (callStatus === 'active' || callStatus === 'connecting') {
-      // If we don't have a call ID yet, we might need one.
-      // For this demo, let's assume we are watching the *latest* call if we just started one.
-      // In a real app, startOutboundCall should return the call ID.
-      // Since startOutboundCall returns { data: request.model_dump() }, it doesn't give ID immediately because it's queued.
-      // But for the purpose of "Make it work with DB", let's assume we poll the *latest* call from DB
-      // and check if it's 'in-progress' or 'queued'.
-
       const pollCall = async () => {
         const calls = await getRecentCalls(1);
         if (calls && calls.length > 0) {
           const latestCall = calls[0];
-          // Update logs if we have a transcript
           if (latestCall.transcript) {
             try {
               const transcript = typeof latestCall.transcript === 'string'
                 ? JSON.parse(latestCall.transcript)
                 : latestCall.transcript;
-
-              // Map transcript to logs format
               const newLogs = transcript.map(entry => ({
                 role: entry.role,
                 text: entry.text,
-                timestamp: new Date().toLocaleTimeString([], { hour12: false }) // Or use entry timestamp if available
+                timestamp: new Date().toLocaleTimeString([], { hour12: false })
               }));
               setLogs(newLogs);
             } catch (e) {
               console.error("Error parsing transcript", e);
             }
           }
-
           if (latestCall.interest_level) {
-            // Map interest level to risk? Or use objection?
-            // Vaani maps risk. Let's map interest level for now.
-            // Hot -> Low Risk, Warm -> Medium, Cold -> High? Or vice versa depending on context (Debt collection: Hot = PTP = Low Risk)
             if (latestCall.interest_level === 'Hot') setRiskLevel('low');
             else if (latestCall.interest_level === 'Warm') setRiskLevel('medium');
             else setRiskLevel('high');
           }
         }
       };
-
       const interval = setInterval(pollCall, 2000);
       return () => clearInterval(interval);
     }
@@ -88,15 +125,12 @@ function App() {
       text: `Initiating call to ${number}...`,
       timestamp: new Date().toLocaleTimeString([], { hour12: false })
     }]);
-
     try {
       await startOutboundCall(number, businessName, agentSlug);
-      // Wait a bit then switch to active
       setTimeout(() => setCallStatus('active'), 2000);
-
       setLogs(prev => [...prev, {
         role: 'system',
-        text: `Call queued successfully.`,
+        text: 'Call queued successfully.',
         timestamp: new Date().toLocaleTimeString([], { hour12: false })
       }]);
     } catch (error) {
@@ -116,12 +150,10 @@ function App() {
       text: 'Call ended.',
       timestamp: new Date().toLocaleTimeString([], { hour12: false })
     }]);
-    // Refresh stats immediately
     getRecentCalls().then(setRecentCalls);
     getStats().then(setStats);
   };
 
-  // Helper to format duration
   const formatDuration = (seconds) => {
     if (!seconds) return '0s';
     const m = Math.floor(seconds / 60);
@@ -133,50 +165,26 @@ function App() {
     <DashboardLayout activeTab={currentView} onTabChange={setCurrentView}>
       {currentView === 'command-center' && (
         <div className="grid grid-cols-12 gap-6 h-[calc(100vh-6rem)]">
-          {/* Top Row: Stats */}
           <div className="col-span-12 grid grid-cols-1 md:grid-cols-4 gap-6 h-32 md:h-40">
-            <StatsCard
-              title="Total Calls"
-              value={stats ? stats.total_calls : "..."}
-              subtext={stats ? "Last 7 days" : "Loading..."}
-              chartColor="#10b981"
-            />
-            <StatsCard
-              title="Avg Duration"
-              value={stats ? formatDuration(stats.avg_duration) : "..."}
-              subtext={stats ? "Last 7 days" : "Loading..."}
-              chartColor="#6366f1"
-            />
-            <StatsCard
-              title="Emails Captured"
-              value={stats ? stats.emails_captured : "..."}
-              subtext={stats ? "Last 7 days" : "Loading..."}
-              chartColor="#f59e0b"
-            />
+            <StatsCard title="Total Calls" value={stats ? stats.total_calls : "..."} subtext={stats ? "Last 7 days" : "Loading..."} chartColor="#10b981" />
+            <StatsCard title="Avg Duration" value={stats ? formatDuration(stats.avg_duration) : "..."} subtext={stats ? "Last 7 days" : "Loading..."} chartColor="#6366f1" />
+            <StatsCard title="Emails Captured" value={stats ? stats.emails_captured : "..."} subtext={stats ? "Last 7 days" : "Loading..."} chartColor="#f59e0b" />
             <div className="bg-slate-900 border border-slate-800 rounded-lg p-5 flex flex-col justify-center items-center h-full">
               <div className="text-slate-400 text-sm font-medium uppercase tracking-wider mb-2">Current Risk Level</div>
               <RiskBadge level={riskLevel} />
             </div>
           </div>
 
-          {/* Middle Row: Main Content */}
           <div className="col-span-12 md:col-span-8 h-full flex flex-col gap-6" style={{ height: 'calc(100% - 11rem)' }}>
-            {/* Terminal takes up most space */}
             <div className="flex-1 min-h-0">
               <Terminal logs={logs} />
             </div>
           </div>
 
-          {/* Right Column: Controls & Details */}
           <div className="col-span-12 md:col-span-4 h-full flex flex-col gap-6" style={{ height: 'calc(100% - 11rem)' }}>
             <div className="flex-shrink-0">
-              <ActiveCallPanel
-                status={callStatus}
-                onStartCall={handleStartCall}
-                onEndCall={handleEndCall}
-              />
+              <ActiveCallPanel status={callStatus} onStartCall={handleStartCall} onEndCall={handleEndCall} />
             </div>
-
             <div className="flex-1 bg-slate-900 border border-slate-800 rounded-lg p-6 overflow-y-auto min-h-0">
               <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-4">Recent Calls</h3>
               <div className="space-y-4">
@@ -203,9 +211,7 @@ function App() {
                   </div>
                 ))}
                 {recentCalls.length === 0 && (
-                  <div className="text-center text-slate-500 text-sm py-4">
-                    No recent calls found.
-                  </div>
+                  <div className="text-center text-slate-500 text-sm py-4">No recent calls found.</div>
                 )}
               </div>
             </div>
@@ -215,30 +221,42 @@ function App() {
 
       {currentView === 'settings' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-[calc(100vh-6rem)]">
-          <div className="h-full">
-            <PromptPanel />
-          </div>
-          {/* Placeholder for future settings */}
+          <div className="h-full"><PromptPanel /></div>
           <div className="bg-slate-900 border border-slate-800 rounded-lg p-6 flex items-center justify-center text-slate-500">
             More settings coming soon...
           </div>
         </div>
       )}
 
-      {currentView === 'call-logs' && (
-        <CallLogs />
-      )}
-
-      {currentView === 'analytics' && (
-        <Analytics />
-      )}
-
+      {currentView === 'call-logs' && <CallLogs />}
+      {currentView === 'analytics' && <Analytics />}
+      {currentView === 'calendar' && <Calendar />}
       {currentView === 'database' && (
-        <div className="flex items-center justify-center h-full text-slate-500">
-          Work in progress...
-        </div>
+        <div className="flex items-center justify-center h-full text-slate-500">Work in progress...</div>
       )}
     </DashboardLayout>
+  );
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/sign-in/*" element={<SignInPage />} />
+        <Route path="/sign-up/*" element={<SignUpPage />} />
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute>
+              <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        {/* Redirect old root to landing */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
 

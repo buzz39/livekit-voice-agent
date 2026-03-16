@@ -2,12 +2,39 @@
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://livekit-outbound-api.tinysaas.fun';
 
+// Helper to get Clerk session token (injected by ClerkProvider)
+async function getAuthHeaders() {
+  try {
+    // Clerk stores the session in window.__clerk__ after initialization
+    if (window.Clerk && window.Clerk.session) {
+      const token = await window.Clerk.session.getToken();
+      if (token) {
+        return { 'Authorization': `Bearer ${token}` };
+      }
+    }
+  } catch (e) {
+    // Silently fail — auth headers are optional until backend enforces them
+  }
+  return {};
+}
+
+async function apiFetch(path, options = {}) {
+  const authHeaders = await getAuthHeaders();
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders,
+      ...(options.headers || {}),
+    },
+  });
+  return response;
+}
+
 export async function getStats() {
   try {
-    const response = await fetch(`${API_BASE_URL}/dashboard/stats`);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
+    const response = await apiFetch('/dashboard/stats');
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     return await response.json();
   } catch (error) {
     console.error("Failed to fetch stats:", error);
@@ -17,10 +44,8 @@ export async function getStats() {
 
 export async function getAnalyticsVolume(days = 30) {
   try {
-    const response = await fetch(`${API_BASE_URL}/dashboard/analytics/volume?days=${days}`);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
+    const response = await apiFetch(`/dashboard/analytics/volume?days=${days}`);
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     return await response.json();
   } catch (error) {
     console.error("Failed to fetch analytics:", error);
@@ -30,10 +55,8 @@ export async function getAnalyticsVolume(days = 30) {
 
 export async function getRecentCalls(limit = 10) {
   try {
-    const response = await fetch(`${API_BASE_URL}/dashboard/calls?limit=${limit}`);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
+    const response = await apiFetch(`/dashboard/calls?limit=${limit}`);
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const data = await response.json();
     return data.map(call => {
       if (call.recording_url && !call.recording_url.startsWith('http')) {
@@ -47,10 +70,20 @@ export async function getRecentCalls(limit = 10) {
   }
 }
 
-// Get all prompts
+export async function getAppointments() {
+  try {
+    const response = await apiFetch('/dashboard/appointments');
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    return await response.json();
+  } catch (error) {
+    console.error("Failed to fetch appointments:", error);
+    return [];
+  }
+}
+
 export const getAllPrompts = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/dashboard/prompts`);
+    const response = await apiFetch('/dashboard/prompts');
     if (!response.ok) throw new Error('Failed to fetch prompts');
     return await response.json();
   } catch (error) {
@@ -59,10 +92,9 @@ export const getAllPrompts = async () => {
   }
 };
 
-// Get active prompt
 export const getActivePrompt = async (name = "default_roofing_agent") => {
   try {
-    const response = await fetch(`${API_BASE_URL}/dashboard/prompt?name=${name}`);
+    const response = await apiFetch(`/dashboard/prompt?name=${name}`);
     if (!response.ok) throw new Error('Failed to fetch prompt');
     return await response.json();
   } catch (error) {
@@ -71,14 +103,10 @@ export const getActivePrompt = async (name = "default_roofing_agent") => {
   }
 };
 
-// Update active prompt
 export const updateActivePrompt = async (content, name = "default_roofing_agent") => {
   try {
-    const response = await fetch(`${API_BASE_URL}/dashboard/prompt`, {
+    const response = await apiFetch('/dashboard/prompt', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
       body: JSON.stringify({ name, content }),
     });
     if (!response.ok) throw new Error('Failed to update prompt');
@@ -91,10 +119,8 @@ export const updateActivePrompt = async (content, name = "default_roofing_agent"
 
 export async function getCallDetails(callId) {
   try {
-    const response = await fetch(`${API_BASE_URL}/dashboard/call/${callId}`);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
+    const response = await apiFetch(`/dashboard/call/${callId}`);
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const data = await response.json();
     if (data && data.recording_url && !data.recording_url.startsWith('http')) {
       data.recording_url = `${API_BASE_URL}${data.recording_url.startsWith('/') ? '' : '/'}${data.recording_url}`;
@@ -106,38 +132,26 @@ export async function getCallDetails(callId) {
   }
 }
 
-/**
- * Save agent configuration (company name, system prompt, TTS provider, language)
- * to the backend /api/config endpoint before starting a call.
- */
 export async function saveAgentConfig(config) {
-  const response = await fetch(`${API_BASE_URL}/api/config`, {
+  const response = await apiFetch('/api/config', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
   });
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
+  if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
   return await response.json();
 }
 
 export async function startOutboundCall(phoneNumber, businessName = "Default Business", agentSlug = "default_roofing_agent") {
   try {
-    const response = await fetch(`${API_BASE_URL}/outbound-call`, {
+    const response = await apiFetch('/outbound-call', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
       body: JSON.stringify({
         phone_number: phoneNumber,
         business_name: businessName,
-        agent_slug: agentSlug
+        agent_slug: agentSlug,
       }),
     });
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     return await response.json();
   } catch (error) {
     console.error("Failed to start call:", error);
