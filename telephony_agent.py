@@ -201,6 +201,24 @@ async def entrypoint(ctx: JobContext):
         "agent_slug": agent_slug
     })
 
+    # ── UI Config override ────────────────────────────────────────────────────
+    # Fetch the active agent config set by the frontend /api/config endpoint.
+    # If a system_prompt was provided there, it overrides the DB prompt.
+    ui_config = {}
+    try:
+        server_base = os.environ.get("SERVER_BASE_URL", "http://localhost:8000")
+        async with httpx.AsyncClient() as _client:
+            _resp = await _client.get(f"{server_base}/api/config", timeout=3.0)
+            if _resp.status_code == 200:
+                ui_config = _resp.json()
+                logger.info(f"Loaded UI config: company={ui_config.get('company_name')}, tts={ui_config.get('tts_provider')}")
+    except Exception as _e:
+        logger.warning(f"Could not fetch UI config from server: {_e}")
+
+    # Resolve company_name / agent_name from UI config (fallback to room metadata / defaults)
+    ui_company_name = ui_config.get("company_name") or business_name
+    ui_agent_name = ui_config.get("agent_name") or "Aisha"
+
     # Fetch agent instructions from database
     logger.info(f"Fetching agent instructions for {agent_slug}...")
     # Update get_active_prompt to take the slug (it was defaulting implicitly before)
@@ -210,6 +228,16 @@ async def entrypoint(ctx: JobContext):
     if not agent_instructions:
         logger.error("No active prompt found in database, using fallback")
         agent_instructions = "You are a professional caller."
+
+    # Override with UI-supplied system prompt if non-empty
+    if ui_config.get("system_prompt", "").strip():
+        agent_instructions = ui_config["system_prompt"]
+        logger.info("Using system prompt from UI config")
+
+    # Substitute {company_name} and {agent_name} placeholders
+    agent_instructions = agent_instructions.replace("{company_name}", ui_company_name)
+    agent_instructions = agent_instructions.replace("{agent_name}", ui_agent_name)
+    logger.info(f"Agent instructions ready (first 120 chars): {agent_instructions[:120]}")
     
     # Inject schema into instructions
     if schema_fields:
@@ -314,9 +342,14 @@ async def entrypoint(ctx: JobContext):
         logger.warning(f"Unsupported STT provider: {ai_config['stt_provider']}, using Deepgram")
         stt = deepgram.STT(model="nova-3", language="en-US")
     
-    # Configure TTS based on database config, with environment variable override
+    # Configure TTS based on database config, with UI config > env variable override
+    # Priority: UI config (from /api/config) > TTS_PROVIDER env var > DB ai_config
     tts_provider_env = os.environ.get("TTS_PROVIDER", "").lower()
-    
+    # Apply UI config override if set
+    if ui_config.get("tts_provider"):
+        tts_provider_env = ui_config["tts_provider"].lower()
+        logger.info(f"TTS provider overridden by UI config: {tts_provider_env}")
+
     # Prioritize environment variable if set and valid
     if tts_provider_env == "sarvam":
         logger.info(f"Using Sarvam TTS based on TTS_PROVIDER environment variable")

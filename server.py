@@ -69,6 +69,16 @@ class PromptUpdateRequest(BaseModel):
     name: str = "roofing_agent"
     content: str
 
+class AgentConfigRequest(BaseModel):
+    company_name: str
+    agent_name: str = "Aisha"
+    system_prompt: str = ""
+    tts_provider: str = "cartesia"  # "cartesia" | "sarvam"
+    language: str = "hinglish"     # "hinglish" | "english" | "hindi"
+
+# In-memory store for active agent config (survives between calls in the same process)
+_active_agent_config: dict = {}
+
 async def initiate_outbound_call(request: OutboundCallRequest):
     """
     Background task to create room and initiate SIP call.
@@ -124,6 +134,24 @@ async def initiate_outbound_call(request: OutboundCallRequest):
         except Exception as e:
             logger.error(f"Failed to dispatch agent: {e}")
             return
+
+
+@app.post("/api/config")
+async def save_agent_config(request: AgentConfigRequest):
+    """
+    Save agent configuration (company name, system prompt, TTS provider, language).
+    Stored in-memory as the active config; picked up by telephony_agent on next call.
+    """
+    global _active_agent_config
+    _active_agent_config = request.model_dump()
+    logger.info(f"Agent config updated: company={request.company_name}, tts={request.tts_provider}, lang={request.language}")
+    return {"status": "ok", "config": _active_agent_config}
+
+
+@app.get("/api/config")
+async def get_agent_config():
+    """Return the current active agent configuration."""
+    return _active_agent_config
 
 
 @app.post("/outbound-call")

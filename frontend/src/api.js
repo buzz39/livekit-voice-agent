@@ -106,6 +106,22 @@ export async function getCallDetails(callId) {
   }
 }
 
+/**
+ * Save agent configuration (company name, system prompt, TTS provider, language)
+ * to the backend /api/config endpoint before starting a call.
+ */
+export async function saveAgentConfig(config) {
+  const response = await fetch(`${API_BASE_URL}/api/config`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  return await response.json();
+}
+
 export async function startOutboundCall(phoneNumber, businessName = "Default Business", agentSlug = "default_roofing_agent") {
   try {
     const response = await fetch(`${API_BASE_URL}/outbound-call`, {
