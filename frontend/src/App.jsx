@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import { useUser, useStackApp, SignIn, SignUp } from '@stackframe/stack';
+import { useUser, useStackApp, SignIn, SignUp } from '@stackframe/react';
 import DashboardLayout from './components/layout/DashboardLayout';
 import Terminal from './components/dashboard/Terminal';
 import StatsCard from './components/dashboard/StatsCard';

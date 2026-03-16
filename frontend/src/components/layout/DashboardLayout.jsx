@@ -1,6 +1,6 @@
 import React from 'react';
 import { Activity, Phone, Database, LayoutDashboard, Settings, BarChart, Calendar, LogOut } from 'lucide-react';
-import { useUser } from '@stackframe/stack';
+import { useUser } from '@stackframe/react';
 
 const DashboardLayout = ({ children, activeTab = 'command-center', onTabChange }) => {
   const user = useUser();
