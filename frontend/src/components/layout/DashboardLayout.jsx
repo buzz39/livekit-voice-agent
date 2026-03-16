@@ -1,18 +1,22 @@
 import React from 'react';
-import { Activity, Phone, Database, LayoutDashboard, Settings, BarChart, Calendar, LogOut, ChevronDown } from 'lucide-react';
-import { useClerk, useUser } from '@clerk/clerk-react';
+import { Activity, Phone, Database, LayoutDashboard, Settings, BarChart, Calendar, LogOut } from 'lucide-react';
+import { useUser } from '@stackframe/stack';
 
 const DashboardLayout = ({ children, activeTab = 'command-center', onTabChange }) => {
-  const { signOut } = useClerk();
-  const { user } = useUser();
+  const user = useUser();
 
-  const handleSignOut = () => {
-    signOut({ redirectUrl: '/' });
+  const handleSignOut = async () => {
+    if (user) {
+      await user.signOut();
+      window.location.href = '/';
+    }
   };
 
-  const initials = user
-    ? `${user.firstName?.[0] || ''}${user.lastName?.[0] || ''}`.toUpperCase() || user.emailAddresses?.[0]?.emailAddress?.[0]?.toUpperCase() || 'U'
-    : 'U';
+  const displayName = user?.displayName || user?.primaryEmail || 'User';
+  const email = user?.primaryEmail || '';
+  const initials = displayName
+    ? displayName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+    : (email[0] || 'U').toUpperCase();
 
   return (
     <div className="flex h-screen bg-slate-950 text-white overflow-hidden">
@@ -65,24 +69,12 @@ const DashboardLayout = ({ children, activeTab = 'command-center', onTabChange }
         {/* User footer */}
         <div className="p-4 border-t border-slate-800">
           <div className="flex items-center gap-2">
-            {user?.imageUrl ? (
-              <img
-                src={user.imageUrl}
-                alt="Avatar"
-                className="w-8 h-8 rounded-full object-cover"
-              />
-            ) : (
-              <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center flex-shrink-0">
-                <span className="font-bold text-xs">{initials}</span>
-              </div>
-            )}
+            <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center flex-shrink-0">
+              <span className="font-bold text-xs">{initials}</span>
+            </div>
             <div className="hidden md:block flex-1 min-w-0">
-              <div className="text-sm font-medium truncate">
-                {user?.fullName || user?.emailAddresses?.[0]?.emailAddress || 'User'}
-              </div>
-              <div className="text-xs text-slate-400 truncate">
-                {user?.emailAddresses?.[0]?.emailAddress || ''}
-              </div>
+              <div className="text-sm font-medium truncate">{displayName}</div>
+              <div className="text-xs text-slate-400 truncate">{email}</div>
             </div>
             <button
               onClick={handleSignOut}

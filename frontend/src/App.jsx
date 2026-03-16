@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import { SignIn, SignUp, useAuth } from '@clerk/clerk-react';
+import { useUser, useStackApp, SignIn, SignUp } from '@stackframe/stack';
 import DashboardLayout from './components/layout/DashboardLayout';
 import Terminal from './components/dashboard/Terminal';
 import StatsCard from './components/dashboard/StatsCard';
@@ -15,24 +15,25 @@ import { getStats, getRecentCalls, startOutboundCall } from './api';
 
 // Protected route wrapper
 const ProtectedRoute = ({ children }) => {
-  const { isSignedIn, isLoaded } = useAuth();
-  if (!isLoaded) {
+  const user = useUser();
+  if (user === undefined) {
+    // Still loading
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
         <div className="text-slate-400 text-sm animate-pulse">Loading...</div>
       </div>
     );
   }
-  if (!isSignedIn) {
+  if (!user) {
     return <Navigate to="/sign-in" replace />;
   }
   return children;
 };
 
-// Clerk sign-in page wrapper
+// Stack Auth sign-in page wrapper
 const SignInPage = () => {
-  const { isSignedIn } = useAuth();
-  if (isSignedIn) return <Navigate to="/dashboard" replace />;
+  const user = useUser();
+  if (user) return <Navigate to="/dashboard" replace />;
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center">
       <div className="w-full max-w-md">
@@ -40,16 +41,16 @@ const SignInPage = () => {
           <h1 className="text-2xl font-bold text-white">Welcome back</h1>
           <p className="text-slate-400 text-sm mt-1">Sign in to your Aisha AI account</p>
         </div>
-        <SignIn routing="path" path="/sign-in" afterSignInUrl="/dashboard" />
+        <SignIn />
       </div>
     </div>
   );
 };
 
-// Clerk sign-up page wrapper
+// Stack Auth sign-up page wrapper
 const SignUpPage = () => {
-  const { isSignedIn } = useAuth();
-  if (isSignedIn) return <Navigate to="/dashboard" replace />;
+  const user = useUser();
+  if (user) return <Navigate to="/dashboard" replace />;
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center">
       <div className="w-full max-w-md">
@@ -57,7 +58,7 @@ const SignUpPage = () => {
           <h1 className="text-2xl font-bold text-white">Get started free</h1>
           <p className="text-slate-400 text-sm mt-1">Create your Aisha AI account</p>
         </div>
-        <SignUp routing="path" path="/sign-up" afterSignUpUrl="/dashboard" />
+        <SignUp />
       </div>
     </div>
   );
@@ -243,8 +244,8 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<LandingPage />} />
-        <Route path="/sign-in/*" element={<SignInPage />} />
-        <Route path="/sign-up/*" element={<SignUpPage />} />
+        <Route path="/sign-in" element={<SignInPage />} />
+        <Route path="/sign-up" element={<SignUpPage />} />
         <Route
           path="/dashboard"
           element={
@@ -253,7 +254,7 @@ function App() {
             </ProtectedRoute>
           }
         />
-        {/* Redirect old root to landing */}
+        {/* Redirect unknown routes to landing */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

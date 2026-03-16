@@ -2,14 +2,17 @@
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://livekit-outbound-api.tinysaas.fun';
 
-// Helper to get Clerk session token (injected by ClerkProvider)
+// Helper to get Stack Auth session token
 async function getAuthHeaders() {
   try {
-    // Clerk stores the session in window.__clerk__ after initialization
-    if (window.Clerk && window.Clerk.session) {
-      const token = await window.Clerk.session.getToken();
-      if (token) {
-        return { 'Authorization': `Bearer ${token}` };
+    // Stack Auth stores the app instance on window after initialization
+    if (window.__stackClientApp) {
+      const user = await window.__stackClientApp.getUser();
+      if (user) {
+        const token = await user.getAuthJson();
+        if (token?.accessToken) {
+          return { 'Authorization': `Bearer ${token.accessToken}` };
+        }
       }
     }
   } catch (e) {

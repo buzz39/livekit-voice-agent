@@ -1,19 +1,30 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { ClerkProvider } from '@clerk/clerk-react'
+import { StackProvider, StackTheme, StackClientApp } from '@stackframe/stack'
 import './index.css'
 import App from './App.jsx'
 
-const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
+const stackApp = new StackClientApp({
+  projectId: import.meta.env.VITE_STACK_PROJECT_ID || 'your_stack_project_id',
+  publishableClientKey: import.meta.env.VITE_STACK_PUBLISHABLE_CLIENT_KEY || 'your_stack_publishable_key',
+  tokenStore: 'cookie',
+  urls: {
+    signIn: '/sign-in',
+    signUp: '/sign-up',
+    afterSignIn: '/dashboard',
+    afterSignUp: '/dashboard',
+  },
+})
 
-if (!PUBLISHABLE_KEY) {
-  console.warn('⚠️ VITE_CLERK_PUBLISHABLE_KEY is not set. Auth will not work. Set it in frontend/.env')
-}
+// Expose to api.js for token retrieval
+window.__stackClientApp = stackApp
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <ClerkProvider publishableKey={PUBLISHABLE_KEY || 'pk_test_placeholder'}>
-      <App />
-    </ClerkProvider>
+    <StackProvider app={stackApp}>
+      <StackTheme>
+        <App />
+      </StackTheme>
+    </StackProvider>
   </StrictMode>,
 )
