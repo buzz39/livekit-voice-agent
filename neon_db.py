@@ -21,8 +21,9 @@ class NeonDB:
     
     def __init__(self, connection_string: Optional[str] = None):
         """Initialize with connection string from env or parameter."""
-        # Fallback to provided credentials if env var is not set (per user request)
-        self.connection_string = connection_string or os.getenv("NEON_DATABASE_URL") or "postgresql://neondb_owner:npg_CnL8lfMaFcV1@ep-winter-base-a4mt71z2-pooler.us-east-1.aws.neon.tech/neondb?channel_binding=require&sslmode=require"
+        self.connection_string = connection_string or os.environ.get("NEON_DATABASE_URL", "")
+        if not self.connection_string:
+            raise ValueError("NEON_DATABASE_URL environment variable is not set")
         self.pool = None
     
     async def connect(self):
