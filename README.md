@@ -14,6 +14,7 @@ A dual-agent telephony platform that handles live phone conversations using Live
 
 ## ✨ Features
 
+- 🖥️ **Configurable UI** — Manage LLM and TTS providers directly from the React dashboard.
 - 📞 **Dual Voice Agents** — Separate inbound and outbound call handling
 - 📡 **SIP Telephony Integration** — Connect to real phone networks
 - 🗄️ **Database-Driven Config** — Agent behavior configured via Neon PostgreSQL, no redeployment needed
@@ -89,14 +90,14 @@ N8N_WEBHOOK_URL=<n8n-endpoint>
 # LLM Configuration
 OPENAI_API_KEY=sk-proj-your-openai-api-key
 GROQ_API_KEY=your_groq_api_key
-LLM_PROVIDER=openai # or groq (defaults to openai)
+LLM_PROVIDER=openai # or groq (defaults to openai, configurable in UI)
 GROQ_MODEL=llama-3.3-70b-versatile # or llama-3.1-8b-instant (only for Groq)
 
 # TTS Configuration
 DEEPGRAM_API_KEY=your-deepgram-api-key # Deepgram API Key (also used for STT)
 SARVAM_API_KEY=your_sarvam_api_key # Get from Sarvam AI dashboard
 CARTESIA_API_KEY=sk_car_your-cartesia-api-key # Get from Cartesia
-TTS_PROVIDER=cartesia # or sarvam or deepgram (defaults to cartesia)
+TTS_PROVIDER=cartesia # or sarvam or deepgram (defaults to cartesia, configurable in UI)
 ```
 
 ## 📸 Screenshots

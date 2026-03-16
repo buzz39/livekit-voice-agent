@@ -22,6 +22,7 @@ const ConfigPanel = ({ onClose, onSave }) => {
     system_prompt: DEFAULT_SYSTEM_PROMPT,
     tts_provider: 'cartesia',
     language: 'hinglish',
+    llm_provider: 'openai',
   });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -113,6 +114,26 @@ const ConfigPanel = ({ onClose, onSave }) => {
             </p>
           </div>
 
+          {/* LLM Provider */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">LLM Provider</label>
+              <div className="relative">
+                <select
+                  className="w-full appearance-none bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 pr-8"
+                  value={config.llm_provider}
+                  onChange={e => handleChange('llm_provider', e.target.value)}
+                >
+                  <option value="openai">OpenAI</option>
+                  <option value="groq">Groq</option>
+                </select>
+                <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
+            </div>
+            {/* Empty div for spacing/alignment, or another option if needed */}
+            <div></div>
+          </div>
+
           {/* TTS Provider + Language (side by side) */}
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -125,6 +146,7 @@ const ConfigPanel = ({ onClose, onSave }) => {
                 >
                   <option value="cartesia">Cartesia</option>
                   <option value="sarvam">Sarvam AI</option>
+                  <option value="deepgram">Deepgram</option>
                 </select>
                 <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
               </div>
