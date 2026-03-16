@@ -12,6 +12,7 @@ from livekit.agents import (
     get_job_context,
 )
 from livekit.plugins import deepgram, openai, silero, inworld
+import groq # Import Groq library
 from livekit import api
 from livekit import rtc
 
@@ -172,7 +173,20 @@ async def entrypoint(ctx: JobContext):
 
     agent = Agent(instructions=agent_instructions, tools=all_tools)
 
-    llm = openai.LLM(model=ai_config.get("llm_model", "gpt-4o-mini"))
+    # Configure LLM based on database config and environment variable override
+    llm_provider_env = os.environ.get("LLM_PROVIDER", "").lower()
+    
+    if llm_provider_env == "groq":
+        logger.info(f"Using Groq LLM based on LLM_PROVIDER environment variable in outbound_agent")
+        groq_model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+        # Using OpenAI LLM class but pointing to Groq's API endpoint
+        llm = openai.LLM(model=groq_model, temperature=float(ai_config.get("llm_temperature", 0.7)), base_url=os.environ.get("GROQ_API_URL", "https://api.groq.com/openai/v1/chat/completions"), api_key=os.environ.get("GROQ_API_KEY"))
+    elif llm_provider_env == "openai" or ai_config.get("llm_provider") == "openai":
+        logger.info(f"Using OpenAI LLM in outbound_agent")
+        llm = openai.LLM(model=ai_config.get("llm_model", "gpt-4o-mini"))
+    else:
+        logger.warning(f"Unsupported LLM provider: {ai_config.get('llm_provider')} or {llm_provider_env}, using OpenAI as fallback in outbound_agent")
+        llm = openai.LLM(model="gpt-4o-mini")
     stt = deepgram.STT(model=ai_config.get("stt_model", "nova-3"), language=ai_config.get("stt_language", "en-US"))
 
     # Configure TTS based on provider

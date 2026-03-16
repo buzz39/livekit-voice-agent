@@ -85,8 +85,18 @@ LIVEKIT_API_KEY=<key>
 LIVEKIT_API_SECRET=<secret>
 DATABASE_URL=<neon-postgres-connection-string>
 N8N_WEBHOOK_URL=<n8n-endpoint>
+
+# LLM Configuration
+OPENAI_API_KEY=sk-proj-your-openai-api-key
+GROQ_API_KEY=your_groq_api_key
+LLM_PROVIDER=openai # or groq (defaults to openai)
+GROQ_MODEL=llama-3.3-70b-versatile # or llama-3.1-8b-instant (only for Groq)
+
+# TTS Configuration
+DEEPGRAM_API_KEY=your-deepgram-api-key # Deepgram API Key (also used for STT)
 SARVAM_API_KEY=your_sarvam_api_key # Get from Sarvam AI dashboard
-TTS_PROVIDER=cartesia # or sarvam (defaults to cartesia)
+CARTESIA_API_KEY=sk_car_your-cartesia-api-key # Get from Cartesia
+TTS_PROVIDER=cartesia # or sarvam or deepgram (defaults to cartesia)
 ```
 
 ## 📸 Screenshots

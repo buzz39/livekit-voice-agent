@@ -28,6 +28,41 @@ from livekit.agents import (
 )
 from livekit.agents.llm import function_tool
 from livekit.plugins import deepgram, openai, cartesia, silero
+import groq # Import Groq library
+
+DEEPGRAM_TTS_URL = os.environ.get("DEEPGRAM_TTS_URL", "https://api.deepgram.com/v1/speak")
+DEEPGRAM_TTS_VOICE = os.environ.get("DEEPGRAM_TTS_VOICE", "aura-angus-en") # Default Deepgram voice
+
+async def deepgram_tts(text: str, voice_id: str = DEEPGRAM_TTS_VOICE) -> bytes:
+    deepgram_api_key = os.environ.get("DEEPGRAM_API_KEY")
+    if not deepgram_api_key:
+        logger.error("DEEPGRAM_API_KEY not set")
+        raise ValueError("Deepgram API key not found.")
+    
+    headers = {
+        "Authorization": f"Token {deepgram_api_key}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "text": text,
+        "model": voice_id,
+        "encoding": "linear16", # LiveKit expects raw audio
+        "sample_rate": 16000 # LiveKit expects 16kHz
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(DEEPGRAM_TTS_URL, json=payload, headers=headers, timeout=10.0)
+            response.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
+            return response.content
+        except httpx.RequestError as exc:
+            logger.error(f"An error occurred while requesting Deepgram TTS: {exc}")
+            raise
+        except httpx.HTTPStatusError as exc:
+            logger.error(f"Deepgram TTS HTTP error for {exc.request.url}: {exc.response.status_code} - {exc.response.text}")
+            raise
+
+
 from livekit import api
 from mcp_integration import load_mcp_tools
 import os
@@ -67,6 +102,40 @@ async def sarvam_tts(text: str, voice_id: str = SARVAM_VOICE_ID) -> bytes:
             raise
         except httpx.HTTPStatusError as exc:
             logger.error(f"Sarvam TTS HTTP error for {exc.request.url}: {exc.response.status_code} - {exc.response.text}")
+            raise
+
+
+GROQ_API_URL = os.environ.get("GROQ_API_URL", "https://api.groq.com/openai/v1/chat/completions")
+
+async def groq_llm_chat(messages: list, model: str) -> str:
+    groq_api_key = os.environ.get("GROQ_API_KEY")
+    if not groq_api_key:
+        logger.error("GROQ_API_KEY not set")
+        raise ValueError("Groq API key not found.")
+
+    headers = {
+        "Authorization": f"Bearer {groq_api_key}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": 0.7 # Using a default temperature
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(GROQ_API_URL, json=payload, headers=headers, timeout=30.0)
+            response.raise_for_status()
+            return response.json()["choices"][0]["message"]["content"]
+        except httpx.RequestError as exc:
+            logger.error(f"An error occurred while requesting Groq LLM: {exc}")
+            raise
+        except httpx.HTTPStatusError as exc:
+            logger.error(f"Groq LLM HTTP error for {exc.request.url}: {exc.response.status_code} - {exc.response.text}")
+            raise
+        except Exception as e:
+            logger.error(f"An unexpected error occurred in groq_llm_chat: {e}")
             raise
 
 
@@ -316,14 +385,21 @@ async def entrypoint(ctx: JobContext):
         tools=all_tools
     )
     
-    # Configure LLM based on database config
-    if ai_config["llm_provider"] == "openai":
+    # Configure LLM based on database config and environment variable override
+    llm_provider_env = os.environ.get("LLM_PROVIDER", "").lower()
+    
+    if llm_provider_env == "groq":
+        logger.info(f"Using Groq LLM based on LLM_PROVIDER environment variable")
+        groq_model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+        llm = openai.LLM(model=groq_model, temperature=float(ai_config.get("llm_temperature", 0.7)), base_url=GROQ_API_URL, api_key=os.environ.get("GROQ_API_KEY")) # Use OpenAI LLM class with Groq endpoint
+    elif llm_provider_env == "openai" or ai_config["llm_provider"] == "openai":
+        logger.info(f"Using OpenAI LLM")
         llm = openai.LLM(
             model=ai_config["llm_model"],
             temperature=float(ai_config["llm_temperature"])
         )
     else:
-        logger.warning(f"Unsupported LLM provider: {ai_config['llm_provider']}, using OpenAI")
+        logger.warning(f"Unsupported LLM provider: {ai_config['llm_provider']} or {llm_provider_env}, using OpenAI as fallback")
         llm = openai.LLM(model="gpt-4o-mini", temperature=0.7)
     
     # Configure STT based on database config
@@ -356,7 +432,10 @@ async def entrypoint(ctx: JobContext):
         # For Sarvam, we'll use a custom function later in session.generate_reply
         # For now, we'll set a placeholder or use openai for structure
         tts = openai.TTS(model="tts-1", voice="alloy") # Placeholder, actual call will be custom
-        
+    elif tts_provider_env == "deepgram":
+        logger.info(f"Using Deepgram TTS based on TTS_PROVIDER environment variable")
+        # Placeholder, actual call will be custom
+        tts = openai.TTS(model="tts-1", voice="alloy") # Placeholder, actual call will be custom
     elif tts_provider_env == "cartesia":
         logger.info(f"Using Cartesia TTS based on TTS_PROVIDER environment variable")
         tts = cartesia.TTS(
@@ -392,6 +471,10 @@ async def entrypoint(ctx: JobContext):
         logger.info(f"Using Sarvam TTS based on database config")
         # Placeholder, actual call will be custom
         tts = openai.TTS(model="tts-1", voice="alloy")
+    elif ai_config["tts_provider"] == "deepgram":
+        logger.info(f"Using Deepgram TTS based on database config")
+        # Placeholder, actual call will be custom
+        tts = openai.TTS(model="tts-1", voice="alloy")
     else:
         logger.warning(f"Unsupported TTS provider: {ai_config['tts_provider']} or {tts_provider_env}, using OpenAI TTS as fallback")
         tts = openai.TTS(model="tts-1", voice="alloy")
@@ -405,12 +488,17 @@ async def entrypoint(ctx: JobContext):
         tts=tts
     )
     
-    # Override TTS generation for Sarvam if selected
+    # Override TTS generation for Sarvam or Deepgram if selected
     if tts_provider_env == "sarvam" or ai_config["tts_provider"] == "sarvam":
         async def sarvam_generate_speech(text: str) -> bytes:
             return await sarvam_tts(text)
         session._generate_speech = sarvam_generate_speech
         logger.info("Overridden session._generate_speech for Sarvam TTS")
+    elif tts_provider_env == "deepgram" or ai_config["tts_provider"] == "deepgram":
+        async def deepgram_generate_speech(text: str) -> bytes:
+            return await deepgram_tts(text, voice_id=ai_config.get("tts_voice", DEEPGRAM_TTS_VOICE))
+        session._generate_speech = deepgram_generate_speech
+        logger.info("Overridden session._generate_speech for Deepgram TTS")
 
     # Track if call was ended by agent
     call_ended_by_agent = False
