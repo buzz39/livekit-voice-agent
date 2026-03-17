@@ -135,6 +135,23 @@ async def initiate_outbound_call(request: OutboundCallRequest):
             logger.error(f"Failed to dispatch agent: {e}")
             return
 
+        # Step 3: Create SIP participant — THIS actually dials the phone
+        try:
+            sip_trunk_id = os.getenv("LIVEKIT_OUTBOUND_TRUNK_ID", SIP_TRUNK_ID)
+            sip_participant = await lk.sip.create_sip_participant(
+                CreateSIPParticipantRequest(
+                    sip_trunk_id=sip_trunk_id,
+                    sip_call_to=request.phone_number,
+                    room_name=room_name,
+                    participant_name="caller",
+                    participant_identity=f"sip-caller-{request.phone_number.replace('+', '')}",
+                )
+            )
+            logger.info(f"SIP participant created — phone dialed: {sip_participant.participant_identity}")
+        except Exception as e:
+            logger.error(f"Failed to create SIP participant (phone not dialed): {e}")
+            return
+
 
 @app.post("/api/config")
 async def save_agent_config(request: AgentConfigRequest):
