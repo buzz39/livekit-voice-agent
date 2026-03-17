@@ -56,7 +56,7 @@ app.add_middleware(
 
 # Configuration
 ROOM_NAME_PREFIX = "outbound-call-"
-SIP_TRUNK_ID = os.getenv("SIP_TRUNK_ID", "ST_WBf7rtea4MQt") # Default from existing code
+SIP_TRUNK_ID = os.getenv("SIP_TRUNK_ID", "ST_nVvG7n8BpJd3") # Default from existing code
 SIP_FROM_NUMBER = os.getenv("SIP_FROM_NUMBER", "+12029787305") # Default from existing code
 
 class OutboundCallRequest(BaseModel):
