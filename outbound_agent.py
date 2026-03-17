@@ -180,7 +180,7 @@ async def entrypoint(ctx: JobContext):
         logger.info(f"Using Groq LLM based on LLM_PROVIDER environment variable in outbound_agent")
         groq_model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
         # Using OpenAI LLM class but pointing to Groq's API endpoint
-        llm = openai.LLM(model=groq_model, temperature=float(ai_config.get("llm_temperature", 0.7)), base_url=os.environ.get("GROQ_API_URL", "https://api.groq.com/openai/v1/chat/completions"), api_key=os.environ.get("GROQ_API_KEY"))
+        llm = openai.LLM(model=groq_model, temperature=float(ai_config.get("llm_temperature", 0.7)), base_url=os.environ.get("GROQ_API_URL", "https://api.groq.com/openai/v1"), api_key=os.environ.get("GROQ_API_KEY"))
     elif llm_provider_env == "openai" or ai_config.get("llm_provider") == "openai":
         logger.info(f"Using OpenAI LLM in outbound_agent")
         llm = openai.LLM(model=ai_config.get("llm_model", "gpt-4o-mini"))
