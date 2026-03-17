@@ -4,6 +4,29 @@
 
 A dual-agent telephony platform that handles live phone conversations using LiveKit, SIP integration, and database-driven agent configuration. Extensible with n8n workflows via Model Context Protocol (MCP).
 
+---
+
+## 🔌 LiveKit + Vobiz SIP Setup
+
+This deployment is wired to the following infrastructure:
+
+| Setting | Value |
+|---|---|
+| **LiveKit Cloud URL** | `wss://sambhavtech-tv4l8lub.livekit.cloud` |
+| **Outbound SIP Trunk** | `ST_nVvG7n8BpJd3` |
+| **Inbound Dispatch Rule** | Routes to agent named `voice-assistant` |
+| **Vobiz SIP Domain** | `f292f0f3.sip.vobiz.ai` |
+| **Phone Number** | `+911171366938` |
+
+### Agent Name
+Both `outbound_agent.py` and `telephony_agent.py` register with LiveKit as `voice-assistant`. This matches the inbound dispatch rule configured in LiveKit Cloud.
+
+### Outbound Trunk
+The outbound SIP dialer (`outbound/sip.py`) reads the trunk ID from `LIVEKIT_OUTBOUND_TRUNK_ID` env var (falls back to legacy `SIP_TRUNK_ID`). Set it to `ST_nVvG7n8BpJd3`.
+
+### Quick Start
+Copy `.env.example` to `.env` — it already contains the Vobiz + LiveKit credentials.
+
 ![Python](https://img.shields.io/badge/Python-LiveKit-3776AB?logo=python&logoColor=white)
 ![LiveKit](https://img.shields.io/badge/LiveKit-SIP-FF6B35)
 ![PostgreSQL](https://img.shields.io/badge/Neon-PostgreSQL-4169E1?logo=postgresql&logoColor=white)

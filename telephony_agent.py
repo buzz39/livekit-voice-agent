@@ -622,5 +622,5 @@ if __name__ == "__main__":
     # Run the agent with the name that matches your dispatch rule
     cli.run_app(WorkerOptions(
         entrypoint_fnc=entrypoint,
-        agent_name="inbound_agent"  # Updated for separate dispatch rule
+        agent_name="voice-assistant"  # Matches LiveKit inbound dispatch rule
     ))

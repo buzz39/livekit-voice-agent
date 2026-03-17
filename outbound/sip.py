@@ -21,11 +21,11 @@ async def dial_participant(ctx, phone_number: str, business_name: str, dispatche
         True if the call was answered (or at least dialed successfully without immediate exception),
         False otherwise.
     """
-    sip_trunk_id = os.getenv("SIP_TRUNK_ID")
+    sip_trunk_id = os.getenv("LIVEKIT_OUTBOUND_TRUNK_ID") or os.getenv("SIP_TRUNK_ID")
     sip_from_number = os.getenv("SIP_FROM_NUMBER")
 
     if not sip_trunk_id:
-        logger.error("SIP_TRUNK_ID not set in env")
+        logger.error("LIVEKIT_OUTBOUND_TRUNK_ID (or SIP_TRUNK_ID) not set in env")
         return False
 
     # Logic for target and identity
