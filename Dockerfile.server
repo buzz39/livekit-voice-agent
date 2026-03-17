@@ -46,4 +46,4 @@ USER appuser
 EXPOSE 8000
 
 # Run server.py
-CMD ["uv", "run", "server.py"]
+CMD ["bash", "/app/start.sh"]
