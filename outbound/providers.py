@@ -10,8 +10,8 @@ from outbound.sarvam_tts import SarvamTTS
 
 logger = logging.getLogger("outbound.providers")
 
-SARVAM_TTS_VOICE = os.getenv("SARVAM_VOICE_ID", "saarika:v2.5")
-SARVAM_PLACEHOLDER_MODEL = "sarvam"
+SARVAM_TTS_VOICE = os.getenv("SARVAM_VOICE_ID", "meera")
+SARVAM_PLACEHOLDER_MODEL = "bulbul:v1"
 
 _REQUIRED_ENV_VARS = {
     "openai": ("OPENAI_API_KEY",),
@@ -206,8 +206,8 @@ def build_tts(ai_config: Dict[str, Any], metadata_overrides: Optional[Dict[str, 
         return inworld.TTS(voice=voice)
 
     if provider == "sarvam":
-        logger.info(f"Using Sarvam TTS: {voice}")
-        return SarvamTTS(voice=voice)
+        logger.info(f"Using Sarvam TTS: {model}/{voice}")
+        return SarvamTTS(voice=voice, model=model)
 
     logger.info(f"Using OpenAI TTS: {model}/{voice}")
     return openai.TTS(model=model, voice=voice)

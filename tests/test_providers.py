@@ -113,12 +113,12 @@ def test_get_missing_provider_env_vars_uses_available_credentials():
 def test_resolve_ai_configuration_preserves_sarvam_provider():
     ai_config = {"tts_provider": "sarvam"}
 
-    with patch.dict("os.environ", {"SARVAM_API_KEY": "test-key"}, clear=False):
+    with patch.dict("os.environ", {"SARVAM_API_KEY": "test-key", "OPENAI_API_KEY": "test-openai", "DEEPGRAM_API_KEY": "test-deepgram"}, clear=True):
         resolved = resolve_ai_configuration(ai_config=ai_config)
 
     assert resolved["tts_provider"] == "sarvam"
-    assert resolved["tts_model"] == "sarvam"
-    assert resolved["tts_voice"] == "saarika:v2.5"
+    assert resolved["tts_model"] == "bulbul:v1"
+    assert resolved["tts_voice"] == "meera"
 
 
 def test_get_missing_provider_env_vars_includes_sarvam_key():
@@ -147,7 +147,7 @@ def test_get_missing_provider_env_vars_sarvam_falls_back_to_openai():
 def test_build_tts_returns_sarvam_tts_instance():
     ai_config = {"tts_provider": "sarvam", "tts_voice": "meera"}
 
-    with patch.dict("os.environ", {"SARVAM_API_KEY": "test-key"}, clear=False):
+    with patch.dict("os.environ", {"SARVAM_API_KEY": "test-key", "OPENAI_API_KEY": "test-openai", "DEEPGRAM_API_KEY": "test-deepgram"}, clear=True):
         tts = build_tts(ai_config=ai_config)
 
     from outbound.sarvam_tts import SarvamTTS

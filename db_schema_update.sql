@@ -66,3 +66,9 @@ BEGIN
         ALTER TABLE objections ADD COLUMN owner_id TEXT;
     END IF;
 END $$;
+
+-- Fix: replace invalid model name 'gpt-5-nano' with working Groq model
+UPDATE ai_configs
+SET llm_model = 'llama-3.3-70b-versatile',
+    llm_provider = 'groq'
+WHERE llm_model = 'gpt-5-nano';

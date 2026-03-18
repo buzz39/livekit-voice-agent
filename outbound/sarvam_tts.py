@@ -19,9 +19,11 @@ from livekit import rtc
 
 logger = logging.getLogger("outbound.sarvam_tts")
 
-SARVAM_API_URL = os.getenv("SARVAM_API_URL", "https://api.sarvam.ai/v1/tts")
-SARVAM_DEFAULT_VOICE = os.getenv("SARVAM_VOICE_ID", "saarika:v2.5")
-SARVAM_SAMPLE_RATE = 16_000
+SARVAM_API_URL = os.getenv("SARVAM_API_URL", "https://api.sarvam.ai/text-to-speech")
+SARVAM_DEFAULT_VOICE = os.getenv("SARVAM_VOICE_ID", "meera")
+SARVAM_DEFAULT_LANGUAGE = os.getenv("SARVAM_LANGUAGE", "hi-IN")
+SARVAM_DEFAULT_MODEL = os.getenv("SARVAM_MODEL", "bulbul:v1")
+SARVAM_SAMPLE_RATE = 8000  # 8 kHz for telephony
 SARVAM_NUM_CHANNELS = 1
 
 
@@ -32,6 +34,8 @@ class SarvamTTS(TTS):
         self,
         *,
         voice: str | None = None,
+        language: str | None = None,
+        model: str | None = None,
         api_key: str | None = None,
         api_url: str | None = None,
         sample_rate: int = SARVAM_SAMPLE_RATE,
@@ -43,6 +47,8 @@ class SarvamTTS(TTS):
             num_channels=num_channels,
         )
         self._voice = voice or SARVAM_DEFAULT_VOICE
+        self._language = language or SARVAM_DEFAULT_LANGUAGE
+        self._model = model or SARVAM_DEFAULT_MODEL
         self._api_key = api_key or os.getenv("SARVAM_API_KEY", "")
         self._api_url = api_url or SARVAM_API_URL
 
@@ -65,6 +71,8 @@ class SarvamTTS(TTS):
             input_text=text,
             conn_options=conn_options,
             voice=self._voice,
+            language=self._language,
+            model=self._model,
             api_key=self._api_key,
             api_url=self._api_url,
         )
@@ -83,11 +91,15 @@ class _SarvamChunkedStream(ChunkedStream):
         input_text: str,
         conn_options: APIConnectOptions,
         voice: str,
+        language: str,
+        model: str,
         api_key: str,
         api_url: str,
     ) -> None:
         super().__init__(tts=tts, input_text=input_text, conn_options=conn_options)
         self._voice = voice
+        self._language = language
+        self._model = model
         self._api_key = api_key
         self._api_url = api_url
 
@@ -103,13 +115,18 @@ class _SarvamChunkedStream(ChunkedStream):
         )
 
         payload = {
-            "text": self._input_text,
-            "voice": self._voice,
-            "response_format": "pcm",
-            "sample_rate": self._tts.sample_rate,
+            "inputs": [self._input_text],
+            "target_language_code": self._language,
+            "speaker": self._voice,
+            "model": self._model,
+            "pitch": 0,
+            "pace": 1.0,
+            "loudness": 1.5,
+            "speech_sample_rate": self._tts.sample_rate,
+            "enable_preprocessing": True,
         }
         headers = {
-            "Authorization": f"Bearer {self._api_key}",
+            "api-subscription-key": self._api_key,
             "Content-Type": "application/json",
         }
 
@@ -122,4 +139,12 @@ class _SarvamChunkedStream(ChunkedStream):
             )
             response.raise_for_status()
 
-        output_emitter.push(response.content)
+        # Sarvam returns JSON with base64-encoded audio
+        data = response.json()
+        audio_b64 = data.get("audios", [None])[0]
+        if audio_b64:
+            import base64
+            audio_bytes = base64.b64decode(audio_b64)
+            output_emitter.push(audio_bytes)
+        else:
+            logger.error("Sarvam TTS returned no audio data")
