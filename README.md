@@ -47,6 +47,20 @@ Copy `.env.example` to `.env` — it already contains the Vobiz + LiveKit creden
 - 🖥️ **React Dashboard** — Frontend for agent management and monitoring
 - 🐳 **Docker & Cloud Ready** — Dockerfile included, deploy anywhere
 
+## 🇮🇳 Production-readiness design for India
+
+If you are evaluating how this system should evolve from a strong pilot into a production-ready platform for the Indian market, see:
+
+- [`PRODUCTION_READY_INDIA.md`](./PRODUCTION_READY_INDIA.md)
+
+That note captures the most important design changes and the reason behind each one, including:
+
+- service separation for reliability and scale
+- compliance-first controls such as consent, suppression, and IST calling windows
+- carrier-aware outbound dialing and fallback
+- multilingual routing beyond Hinglish
+- security, auditability, and cost-aware orchestration
+
 ## 🏗️ Architecture
 
 ```
