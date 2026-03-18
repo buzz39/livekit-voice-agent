@@ -13,7 +13,7 @@ def create_tools(
     db: Any,
     dispatcher: Any,
     contact_id: str,
-    phone_number: str,
+    phone_number: Optional[str],
     hangup_callback: Callable[[], Any],
     ctx: Optional[Any] = None,
     sip_domain: Optional[str] = None,
@@ -27,11 +27,11 @@ def create_tools(
         db: Database interface.
         dispatcher: WebhookDispatcher instance.
         contact_id: The database ID of the contact.
-        phone_number: The phone number of the contact.
+        phone_number: The phone number of the contact, if known.
         hangup_callback: Async function to trigger hangup/finalization.
     """
 
-    sip_domain = sip_domain or os.getenv("VOBIZ_SIP_DOMAIN")
+    sip_domain = sip_domain or os.getenv("SIP_DOMAIN") or os.getenv("VOBIZ_SIP_DOMAIN")
     default_transfer_destination = default_transfer_destination or os.getenv("DEFAULT_TRANSFER_NUMBER")
 
     def _format_transfer_destination(destination: str) -> str:
@@ -53,8 +53,6 @@ def create_tools(
             for participant in ctx.room.remote_participants.values():
                 if participant.identity.startswith("sip_"):
                     return participant.identity
-            for participant in ctx.room.remote_participants.values():
-                return participant.identity
         return None
 
     @function_tool
@@ -107,15 +105,15 @@ def create_tools(
     if ctx:
         @function_tool
         async def lookup_user(phone: str) -> str:
-            """Look up the caller or another user by phone number."""
-            if phone == phone_number:
+            """Look up the current caller by phone number when it matches the active call."""
+            if phone_number is not None and phone == phone_number:
                 business_name = call_metadata.get("business_name") or "Unknown business"
                 return f"User found for {phone}: business={business_name}, contact_id={contact_id}."
             return f"No stored details found for {phone}."
 
         @function_tool
         async def transfer_call(destination: Optional[str] = None) -> str:
-            """Transfer the live call to a human or another SIP destination."""
+            """Transfer the live call to a phone number or SIP URI, defaulting to configured fallback routing."""
             transfer_target = destination or default_transfer_destination
             if not transfer_target:
                 return "No transfer destination is configured."

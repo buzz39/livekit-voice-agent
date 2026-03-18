@@ -124,7 +124,8 @@ async def test_transfer_call_formats_plain_number_with_sip_domain():
         sip_domain="demo.sip.test",
     )
 
-    transfer_call_tool = next(t for t in tools if t.__name__ == "transfer_call")
+    transfer_call_tool = next((t for t in tools if t.__name__ == "transfer_call"), None)
+    assert transfer_call_tool is not None
 
     result = await transfer_call_tool(destination="+15551112222")
 
@@ -156,7 +157,8 @@ async def test_transfer_call_uses_default_tel_destination_without_sip_domain():
         default_transfer_destination="+15553334444",
     )
 
-    transfer_call_tool = next(t for t in tools if t.__name__ == "transfer_call")
+    transfer_call_tool = next((t for t in tools if t.__name__ == "transfer_call"), None)
+    assert transfer_call_tool is not None
 
     result = await transfer_call_tool()
 
