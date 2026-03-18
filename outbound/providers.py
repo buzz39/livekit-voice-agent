@@ -118,6 +118,16 @@ def build_llm(ai_config: Dict[str, Any], metadata_overrides: Optional[Dict[str, 
     if provider == "groq":
         model = resolved["llm_model"]
         temperature = resolved["llm_temperature"]
+        # Groq only supports its own model catalogue; catch obvious misconfigurations
+        # (e.g. an OpenAI model name stored in the DB) early with a clear message.
+        if model and model.startswith(("gpt-", "o1-", "o3-", "chatgpt-")):
+            logger.warning(
+                "Groq provider configured with non-Groq model '%s' — "
+                "falling back to default '%s'. Update the ai_config in the database.",
+                model,
+                default_config.GROQ_MODEL,
+            )
+            model = default_config.GROQ_MODEL
         logger.info(f"Using Groq LLM: {model}")
         return openai.LLM(
             model=model,
