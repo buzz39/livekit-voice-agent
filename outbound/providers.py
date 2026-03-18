@@ -34,6 +34,11 @@ def _override(metadata_overrides: Optional[Dict[str, Any]], *keys: str) -> Optio
     return None
 
 
+def _has_credentials(provider: str) -> bool:
+    """Return True if all required env vars for *provider* are set."""
+    return all(os.getenv(v) for v in _REQUIRED_ENV_VARS.get(provider, ()))
+
+
 def resolve_ai_configuration(ai_config: Dict[str, Any], metadata_overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     llm_provider = (
         os.getenv("LLM_PROVIDER")
@@ -41,6 +46,19 @@ def resolve_ai_configuration(ai_config: Dict[str, Any], metadata_overrides: Opti
         or ai_config.get("llm_provider")
         or default_config.DEFAULT_LLM_PROVIDER
     ).lower()
+
+    # Auto-fallback: if the chosen LLM provider's credentials are missing, degrade
+    # to a provider that IS configured rather than aborting the call entirely.
+    if not _has_credentials(llm_provider):
+        fallback = "openai" if llm_provider != "openai" else "groq"
+        if _has_credentials(fallback):
+            logger.warning(
+                "LLM provider '%s' credentials missing — falling back to '%s'",
+                llm_provider, fallback,
+            )
+            llm_provider = fallback
+        # If neither has credentials the downstream validation will still catch it.
+
     llm_model = (
         _override(metadata_overrides, "llm_model")
         or ai_config.get("llm_model")
@@ -70,6 +88,17 @@ def resolve_ai_configuration(ai_config: Dict[str, Any], metadata_overrides: Opti
         or ai_config.get("tts_provider")
         or default_config.DEFAULT_TTS_PROVIDER
     ).lower()
+
+    # Auto-fallback for TTS provider as well
+    if not _has_credentials(tts_provider):
+        fallback = "openai" if tts_provider != "openai" else "cartesia"
+        if _has_credentials(fallback):
+            logger.warning(
+                "TTS provider '%s' credentials missing — falling back to '%s'",
+                tts_provider, fallback,
+            )
+            tts_provider = fallback
+
     tts_voice = _override(metadata_overrides, "voice_id", "tts_voice") or ai_config.get("tts_voice")
     tts_model = _override(metadata_overrides, "tts_model") or ai_config.get("tts_model")
 
@@ -114,10 +143,10 @@ def get_missing_provider_env_vars(ai_config: Dict[str, Any], metadata_overrides:
 def build_llm(ai_config: Dict[str, Any], metadata_overrides: Optional[Dict[str, Any]] = None):
     resolved = resolve_ai_configuration(ai_config=ai_config, metadata_overrides=metadata_overrides)
     provider = resolved["llm_provider"]
+    model = resolved["llm_model"]
+    temperature = resolved["llm_temperature"]
 
     if provider == "groq":
-        model = resolved["llm_model"]
-        temperature = resolved["llm_temperature"]
         # Groq only supports its own model catalogue; catch obvious misconfigurations
         # (e.g. an OpenAI model name stored in the DB) early with a clear message.
         if model and model.startswith(("gpt-", "o1-", "o3-", "chatgpt-")):
@@ -136,8 +165,15 @@ def build_llm(ai_config: Dict[str, Any], metadata_overrides: Optional[Dict[str, 
             api_key=os.getenv("GROQ_API_KEY"),
         )
 
-    model = resolved["llm_model"]
-    temperature = resolved["llm_temperature"]
+    # OpenAI (default) — fix model if it's a leftover Groq model name after fallback
+    if model and not model.startswith(("gpt-", "o1-", "o3-", "chatgpt-")):
+        logger.warning(
+            "OpenAI provider configured with non-OpenAI model '%s' — "
+            "falling back to default '%s'.",
+            model,
+            default_config.DEFAULT_LLM_MODEL,
+        )
+        model = default_config.DEFAULT_LLM_MODEL
     logger.info(f"Using OpenAI LLM: {model}")
     return openai.LLM(model=model, temperature=temperature)
 
