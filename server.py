@@ -61,8 +61,20 @@ SIP_TRUNK_ID = os.getenv("SIP_TRUNK_ID", "ST_nVvG7n8BpJd3") # Default from exist
 SIP_FROM_NUMBER = os.getenv("SIP_FROM_NUMBER", "+12029787305") # Default from existing code
 API_BASE_URL = os.getenv("API_BASE_URL", "").rstrip("/")  # e.g. https://livekit-outbound-api.tinysaas.fun
 
-# E.164 pattern: + followed by 1-15 digits
+# E.164 pattern: starts with + and a non-zero country code digit, followed by 1–14 more
+# digits (ITU-T E.164 allows up to 15 digits total including country code).
 _E164_RE = re.compile(r"^\+[1-9]\d{1,14}$")
+
+
+def _rewrite_recording_url(call: dict) -> None:
+    """Replace the raw S3 recording URL with a proxied dashboard audio URL."""
+    if call.get("recording_url"):
+        call_id = call["id"]
+        call["recording_url"] = (
+            f"{API_BASE_URL}/dashboard/audio/{call_id}"
+            if API_BASE_URL
+            else f"/dashboard/audio/{call_id}"
+        )
 
 class OutboundCallRequest(BaseModel):
     phone_number: str
@@ -345,9 +357,7 @@ async def get_dashboard_calls(limit: int = 10):
         # This fixes issues where the frontend (local) cannot access the S3/MinIO endpoint (internal docker)
         # or avoids CORS/Presigning issues entirely.
         for call in calls:
-            if call.get("recording_url"):
-                # Use the audio proxy endpoint
-                call["recording_url"] = f"{API_BASE_URL}/dashboard/audio/{call['id']}" if API_BASE_URL else f"/dashboard/audio/{call['id']}"
+            _rewrite_recording_url(call)
         return calls
     except Exception as e:
         logger.error(f"Error fetching calls: {e}")
@@ -364,8 +374,7 @@ async def get_call_details(call_id: int):
         if not call:
              raise HTTPException(status_code=404, detail="Call not found")
 
-        if call.get("recording_url"):
-            call["recording_url"] = f"{API_BASE_URL}/dashboard/audio/{call['id']}" if API_BASE_URL else f"/dashboard/audio/{call['id']}"
+        _rewrite_recording_url(call)
 
         return call
     except HTTPException:
