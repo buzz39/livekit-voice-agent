@@ -37,7 +37,9 @@ def create_tools(
     def _format_transfer_destination(destination: str) -> str:
         clean_destination = destination.strip()
         if "@" in clean_destination:
-            return clean_destination if clean_destination.startswith("sip:") else f"sip:{clean_destination.removeprefix('tel:')}"
+            if clean_destination.startswith("sip:"):
+                return clean_destination
+            return f"sip:{clean_destination.removeprefix('tel:')}"
 
         clean_destination = clean_destination.removeprefix("tel:").removeprefix("sip:")
         if sip_domain:
@@ -48,6 +50,9 @@ def create_tools(
         if phone_number:
             return f"sip_{phone_number}"
         if ctx:
+            for participant in ctx.room.remote_participants.values():
+                if participant.identity.startswith("sip_"):
+                    return participant.identity
             for participant in ctx.room.remote_participants.values():
                 return participant.identity
         return None
