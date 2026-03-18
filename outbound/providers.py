@@ -163,6 +163,7 @@ def build_llm(ai_config: Dict[str, Any], metadata_overrides: Optional[Dict[str, 
             temperature=temperature,
             base_url=os.getenv("GROQ_API_URL", "https://api.groq.com/openai/v1"),
             api_key=os.getenv("GROQ_API_KEY"),
+            _strict_tool_schema=False,  # Groq rejects OpenAI strict-mode schemas for zero-param tools
         )
 
     # OpenAI (default) — fix model if it's a leftover Groq model name after fallback

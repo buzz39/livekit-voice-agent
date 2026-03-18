@@ -27,6 +27,7 @@ def test_build_llm_uses_metadata_override_for_groq():
     assert kwargs["temperature"] == 0.9
     assert kwargs["base_url"] == "https://api.groq.com/openai/v1"
     assert kwargs["api_key"] == "test-key"
+    assert kwargs["_strict_tool_schema"] is False
 
 
 def test_build_stt_uses_metadata_override_values():
