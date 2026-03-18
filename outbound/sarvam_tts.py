@@ -20,12 +20,59 @@ from livekit import rtc
 logger = logging.getLogger("outbound.sarvam_tts")
 
 SARVAM_API_URL = os.getenv("SARVAM_API_URL", "https://api.sarvam.ai/text-to-speech")
-SARVAM_DEFAULT_VOICE = os.getenv("SARVAM_VOICE_ID", "meera")
+SARVAM_DEFAULT_VOICE = os.getenv("SARVAM_VOICE_ID", "anushka")
 SARVAM_DEFAULT_LANGUAGE = os.getenv("SARVAM_LANGUAGE", "hi-IN")
 SARVAM_DEFAULT_MODEL = os.getenv("SARVAM_MODEL", "bulbul:v1")
 SARVAM_SAMPLE_RATE = 8000  # 8 kHz for telephony
 SARVAM_NUM_CHANNELS = 1
-VALID_SARVAM_SPEAKERS = {"meera", "pavithra", "maitreyi", "arvind", "amol", "amartya"}
+VALID_SARVAM_SPEAKERS = {
+    "anushka",
+    "abhilash",
+    "manisha",
+    "vidya",
+    "arya",
+    "karun",
+    "hitesh",
+    "aditya",
+    "ritu",
+    "priya",
+    "neha",
+    "rahul",
+    "pooja",
+    "rohan",
+    "simran",
+    "kavya",
+    "amit",
+    "dev",
+    "ishita",
+    "shreya",
+    "ratan",
+    "varun",
+    "manan",
+    "sumit",
+    "roopa",
+    "kabir",
+    "aayan",
+    "shubh",
+    "ashutosh",
+    "advait",
+    "amelia",
+    "sophia",
+    "anand",
+    "tanya",
+    "tarun",
+    "sunny",
+    "mani",
+    "gokul",
+    "vijay",
+    "shruti",
+    "suhani",
+    "mohit",
+    "kavitha",
+    "rehan",
+    "soham",
+    "rupali",
+}
 
 
 def normalize_sarvam_speaker(voice: Optional[str]) -> str:
