@@ -26,7 +26,14 @@ from outbound.sip import dial_participant
 from outbound.tools import create_tools
 from outbound.recording import start_recording
 from outbound.lifecycle import finalize_call as finalize_call_logic
-from outbound.providers import build_llm, build_stt, build_tts, get_missing_provider_env_vars, resolve_ai_configuration
+from outbound.providers import (
+    build_custom_tts_generator,
+    build_llm,
+    build_stt,
+    build_tts,
+    get_missing_provider_env_vars,
+    resolve_ai_configuration,
+)
 
 # Whispey Observability Integration
 try:
@@ -42,6 +49,15 @@ if not WHISPEY_ENABLED:
     logger.warning("Whispey not installed. Install with: pip install whispey")
 
 async def entrypoint(ctx: JobContext):
+    try:
+        await _run_entrypoint(ctx)
+    except Exception:
+        room_name = getattr(getattr(ctx, "room", None), "name", "unknown_room")
+        logger.exception("Agent crashed while handling room %s", room_name)
+        raise
+
+
+async def _run_entrypoint(ctx: JobContext):
     """Main entry point for the outbound voice agent."""
 
     # 1. Initialize per-call state
@@ -210,9 +226,33 @@ async def entrypoint(ctx: JobContext):
 
     agent = Agent(instructions=agent_instructions, tools=all_tools)
 
-    llm = build_llm(ai_config=ai_config, metadata_overrides=initial_metadata)
-    stt = build_stt(ai_config=ai_config, metadata_overrides=initial_metadata)
-    tts = build_tts(ai_config=ai_config, metadata_overrides=initial_metadata)
+    try:
+        llm = build_llm(ai_config=ai_config, metadata_overrides=initial_metadata)
+        stt = build_stt(ai_config=ai_config, metadata_overrides=initial_metadata)
+        tts = build_tts(ai_config=ai_config, metadata_overrides=initial_metadata)
+        custom_tts_generator = build_custom_tts_generator(ai_config=ai_config, metadata_overrides=initial_metadata)
+    except Exception as e:
+        error_message = (
+            "Failed to initialize outbound AI providers "
+            f"(llm={resolved_ai_config['llm_provider']}, stt={resolved_ai_config['stt_provider']}, "
+            f"tts={resolved_ai_config['tts_provider']}): {e}"
+        )
+        call_metadata["notes"].append(error_message)
+        logger.error(error_message, exc_info=True)
+        try:
+            await dispatcher.dispatch(
+                "call.failed",
+                {
+                    "phone_number": phone_number,
+                    "business_name": business_name,
+                    "agent_slug": agent_slug,
+                    "stage": "provider_initialization",
+                    "error": error_message,
+                },
+            )
+        except Exception as dispatch_error:
+            logger.warning("call.failed webhook error during provider initialization: %s", dispatch_error)
+        return
 
     # Tune VAD parameters to reduce self-interruption and false positives from noise/echo
     # min_speech_duration: 0.2s (up from default ~0.05-0.1) to ignore short clicks/pops
@@ -228,6 +268,13 @@ async def entrypoint(ctx: JobContext):
         llm=llm,
         tts=tts
     )
+
+    if custom_tts_generator:
+        # LiveKit's current AgentSession API still requires a TTS object at construction
+        # time, so Sarvam hooks in through the same private generator override already
+        # used by the legacy telephony agent in this repository.
+        session._generate_speech = custom_tts_generator
+        logger.info("Overrode session speech generation for %s TTS", resolved_ai_config["tts_provider"])
 
     # Start Whispey session tracking with metadata
     session_id = None
@@ -245,7 +292,33 @@ async def entrypoint(ctx: JobContext):
 
     # 5. Start Session ASYNCHRONOUSLY (Critical for latency)
     logger.info("Starting LiveKit agent session")
-    session_start_task = asyncio.create_task(session.start(agent=agent, room=ctx.room))
+
+    async def start_agent_session():
+        try:
+            await session.start(agent=agent, room=ctx.room)
+        except Exception as e:
+            error_message = (
+                f"LiveKit agent session failed to start for room {ctx.room.name} "
+                f"(agent={agent_slug}): {e}"
+            )
+            call_metadata["notes"].append(error_message)
+            logger.error(error_message, exc_info=True)
+            try:
+                await dispatcher.dispatch(
+                    "call.failed",
+                    {
+                        "phone_number": phone_number,
+                        "business_name": business_name,
+                        "agent_slug": agent_slug,
+                        "stage": "session_start",
+                        "error": error_message,
+                    },
+                )
+            except Exception as dispatch_error:
+                logger.warning("call.failed webhook error during session start: %s", dispatch_error)
+            raise
+
+    session_start_task = asyncio.create_task(start_agent_session())
 
     # 6. Dial the user (SIP)
     # This function handles the dialing and basic error reporting
@@ -271,7 +344,14 @@ async def entrypoint(ctx: JobContext):
     
     # Ensure session is started before speaking
     logger.info("Waiting for LiveKit agent session to finish startup before sending opening line")
-    await session_start_task
+    try:
+        await session_start_task
+    except Exception:
+        try:
+            await hangup_call()
+        except Exception as hangup_error:
+            logger.warning("Failed to clean up after session startup error: %s", hangup_error)
+        return
     logger.info("LiveKit agent session is ready; sending opening line")
     
     try:

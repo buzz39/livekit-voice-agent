@@ -1,6 +1,15 @@
 from unittest.mock import patch
 
-from outbound.providers import build_llm, build_stt, build_tts, get_missing_provider_env_vars, resolve_ai_configuration
+import pytest
+
+from outbound.providers import (
+    build_custom_tts_generator,
+    build_llm,
+    build_stt,
+    build_tts,
+    get_missing_provider_env_vars,
+    resolve_ai_configuration,
+)
 
 
 def test_build_llm_uses_metadata_override_for_groq():
@@ -99,3 +108,46 @@ def test_get_missing_provider_env_vars_uses_available_credentials():
         missing = get_missing_provider_env_vars(ai_config=ai_config)
 
     assert missing == []
+
+
+def test_resolve_ai_configuration_preserves_sarvam_provider():
+    ai_config = {"tts_provider": "sarvam"}
+
+    resolved = resolve_ai_configuration(ai_config=ai_config)
+
+    assert resolved["tts_provider"] == "sarvam"
+    assert resolved["tts_model"] == "sarvam"
+    assert resolved["tts_voice"] == "saarika:v2.5"
+
+
+def test_get_missing_provider_env_vars_includes_sarvam_key():
+    ai_config = {"tts_provider": "sarvam"}
+
+    with patch.dict("os.environ", {"OPENAI_API_KEY": "test-openai", "DEEPGRAM_API_KEY": "test-deepgram"}, clear=True):
+        missing = get_missing_provider_env_vars(ai_config=ai_config)
+
+    assert missing == ["SARVAM_API_KEY"]
+
+
+def test_build_tts_uses_placeholder_for_sarvam():
+    ai_config = {"tts_provider": "sarvam", "tts_voice": "meera"}
+    tts_instance = object()
+
+    with patch("outbound.providers.openai.TTS", return_value=tts_instance) as mock_tts:
+        tts = build_tts(ai_config=ai_config)
+
+    assert tts is tts_instance
+    mock_tts.assert_called_once_with(model="tts-1", voice="alloy")
+
+
+@pytest.mark.asyncio
+async def test_build_custom_tts_generator_uses_sarvam_voice():
+    ai_config = {"tts_provider": "sarvam", "tts_voice": "meera"}
+    audio = b"pcm"
+
+    with patch("outbound.providers.sarvam_tts", return_value=audio) as mock_sarvam:
+        generator = build_custom_tts_generator(ai_config=ai_config)
+        result = await generator("hello")
+
+    assert result == audio
+    mock_sarvam.assert_called_once_with(text="hello", voice_id="meera")
