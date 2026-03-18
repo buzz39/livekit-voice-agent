@@ -78,7 +78,6 @@ def resolve_ai_configuration(ai_config: Dict[str, Any], metadata_overrides: Opti
         tts_voice = tts_voice or default_config.CARTESIA_TTS_VOICE
     elif tts_provider == "deepgram":
         tts_model = tts_model or default_config.DEEPGRAM_TTS_MODEL
-        tts_voice = tts_voice or ai_config.get("tts_voice")
     elif tts_provider == "inworld":
         tts_voice = tts_voice or default_config.INWORLD_TTS_VOICE
     elif tts_provider == "sarvam":
@@ -161,6 +160,8 @@ def build_tts(ai_config: Dict[str, Any], metadata_overrides: Optional[Dict[str, 
 
     if provider == "sarvam":
         logger.info(f"Using Sarvam TTS via custom generator: {voice}")
+        # AgentSession still expects a TTS object at construction time; outbound_agent
+        # swaps in the real Sarvam PCM generator immediately after the session is built.
         return openai.TTS(model=default_config.OPENAI_TTS_MODEL, voice=default_config.OPENAI_TTS_VOICE)
 
     logger.info(f"Using OpenAI TTS: {model}/{voice}")
@@ -170,8 +171,8 @@ def build_tts(ai_config: Dict[str, Any], metadata_overrides: Optional[Dict[str, 
 async def sarvam_tts(text: str, voice_id: Optional[str] = None) -> bytes:
     api_key = os.getenv("SARVAM_API_KEY")
     if not api_key:
-        logger.error("SARVAM_API_KEY not set")
-        raise ValueError("Sarvam API key not found.")
+        logger.error("SARVAM_API_KEY environment variable is not set")
+        raise ValueError("SARVAM_API_KEY environment variable is not set.")
 
     payload = {
         "text": text,
@@ -186,7 +187,7 @@ async def sarvam_tts(text: str, voice_id: Optional[str] = None) -> bytes:
             response = await client.post(SARVAM_API_URL, json=payload, headers=headers, timeout=10.0)
             response.raise_for_status()
         except httpx.RequestError as exc:
-            logger.error(f"An error occurred while requesting Sarvam TTS: {exc}")
+            logger.error("Network error while requesting Sarvam TTS (%s): %s", type(exc).__name__, exc)
             raise
         except httpx.HTTPStatusError as exc:
             logger.error(
@@ -206,7 +207,7 @@ def build_custom_tts_generator(
 
     voice = resolved["tts_voice"]
 
-    async def generate_speech(text: str) -> bytes:
+    async def generate_sarvam_speech(text: str) -> bytes:
         return await sarvam_tts(text=text, voice_id=voice)
 
-    return generate_speech
+    return generate_sarvam_speech

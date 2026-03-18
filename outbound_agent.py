@@ -52,7 +52,7 @@ async def entrypoint(ctx: JobContext):
     try:
         await _run_entrypoint(ctx)
     except Exception:
-        room_name = getattr(getattr(ctx, "room", None), "name", "<unassigned>")
+        room_name = getattr(getattr(ctx, "room", None), "name", "unknown_room")
         logger.exception("Agent crashed while handling room %s", room_name)
         raise
 
@@ -232,7 +232,11 @@ async def _run_entrypoint(ctx: JobContext):
         tts = build_tts(ai_config=ai_config, metadata_overrides=initial_metadata)
         custom_tts_generator = build_custom_tts_generator(ai_config=ai_config, metadata_overrides=initial_metadata)
     except Exception as e:
-        error_message = f"Failed to initialize outbound AI providers: {e}"
+        error_message = (
+            "Failed to initialize outbound AI providers "
+            f"(llm={resolved_ai_config['llm_provider']}, stt={resolved_ai_config['stt_provider']}, "
+            f"tts={resolved_ai_config['tts_provider']}): {e}"
+        )
         call_metadata["notes"].append(error_message)
         logger.error(error_message, exc_info=True)
         try:
@@ -247,7 +251,7 @@ async def _run_entrypoint(ctx: JobContext):
                 },
             )
         except Exception as dispatch_error:
-            logger.debug(f"call.failed webhook error during provider initialization: {dispatch_error}")
+            logger.warning("call.failed webhook error during provider initialization: %s", dispatch_error)
         return
 
     # Tune VAD parameters to reduce self-interruption and false positives from noise/echo
@@ -266,6 +270,9 @@ async def _run_entrypoint(ctx: JobContext):
     )
 
     if custom_tts_generator:
+        # LiveKit's current AgentSession API still requires a TTS object at construction
+        # time, so Sarvam hooks in through the same private generator override already
+        # used by the legacy telephony agent in this repository.
         session._generate_speech = custom_tts_generator
         logger.info("Overrode session speech generation for %s TTS", resolved_ai_config["tts_provider"])
 
@@ -290,7 +297,10 @@ async def _run_entrypoint(ctx: JobContext):
         try:
             await session.start(agent=agent, room=ctx.room)
         except Exception as e:
-            error_message = f"LiveKit agent session failed to start: {e}"
+            error_message = (
+                f"LiveKit agent session failed to start for room {ctx.room.name} "
+                f"(agent={agent_slug}): {e}"
+            )
             call_metadata["notes"].append(error_message)
             logger.error(error_message, exc_info=True)
             try:
@@ -305,7 +315,7 @@ async def _run_entrypoint(ctx: JobContext):
                     },
                 )
             except Exception as dispatch_error:
-                logger.debug(f"call.failed webhook error during session start: {dispatch_error}")
+                logger.warning("call.failed webhook error during session start: %s", dispatch_error)
             raise
 
     session_start_task = asyncio.create_task(start_agent_session())
@@ -340,7 +350,7 @@ async def _run_entrypoint(ctx: JobContext):
         try:
             await hangup_call()
         except Exception as hangup_error:
-            logger.warning(f"Failed to clean up after session startup error: {hangup_error}")
+            logger.warning("Failed to clean up after session startup error: %s", hangup_error)
         return
     logger.info("LiveKit agent session is ready; sending opening line")
     
