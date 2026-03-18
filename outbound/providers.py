@@ -6,12 +6,17 @@ import httpx
 from livekit.plugins import cartesia, deepgram, inworld, openai
 
 import config as default_config
-from outbound.sarvam_tts import SarvamTTS
+from outbound.sarvam_tts import (
+    SARVAM_DEFAULT_MODEL,
+    SARVAM_DEFAULT_VOICE,
+    VALID_SARVAM_SPEAKERS,
+    SarvamTTS,
+)
 
 logger = logging.getLogger("outbound.providers")
 
-SARVAM_TTS_VOICE = os.getenv("SARVAM_VOICE_ID", "meera")
-SARVAM_PLACEHOLDER_MODEL = "bulbul:v1"
+SARVAM_TTS_VOICE = os.getenv("SARVAM_VOICE_ID", SARVAM_DEFAULT_VOICE)
+SARVAM_PLACEHOLDER_MODEL = SARVAM_DEFAULT_MODEL
 
 _REQUIRED_ENV_VARS = {
     "openai": ("OPENAI_API_KEY",),
@@ -112,6 +117,10 @@ def resolve_ai_configuration(ai_config: Dict[str, Any], metadata_overrides: Opti
     elif tts_provider == "sarvam":
         tts_model = tts_model or SARVAM_PLACEHOLDER_MODEL
         tts_voice = tts_voice or SARVAM_TTS_VOICE
+        if tts_model == "sarvam":
+            tts_model = SARVAM_PLACEHOLDER_MODEL
+        if tts_voice not in VALID_SARVAM_SPEAKERS:
+            tts_voice = SARVAM_TTS_VOICE
     else:
         tts_provider = "openai"
         tts_model = tts_model or default_config.OPENAI_TTS_MODEL

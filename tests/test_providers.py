@@ -152,3 +152,14 @@ def test_build_tts_returns_sarvam_tts_instance():
 
     from outbound.sarvam_tts import SarvamTTS
     assert isinstance(tts, SarvamTTS)
+
+
+def test_resolve_ai_configuration_normalizes_legacy_sarvam_values():
+    ai_config = {"tts_provider": "sarvam", "tts_voice": "Sarah", "tts_model": "sarvam"}
+
+    with patch.dict("os.environ", {"SARVAM_API_KEY": "test-key", "OPENAI_API_KEY": "test-openai", "DEEPGRAM_API_KEY": "test-deepgram"}, clear=True):
+        resolved = resolve_ai_configuration(ai_config=ai_config)
+
+    assert resolved["tts_provider"] == "sarvam"
+    assert resolved["tts_voice"] == "meera"
+    assert resolved["tts_model"] == "bulbul:v1"

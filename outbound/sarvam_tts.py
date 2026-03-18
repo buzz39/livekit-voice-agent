@@ -25,6 +25,19 @@ SARVAM_DEFAULT_LANGUAGE = os.getenv("SARVAM_LANGUAGE", "hi-IN")
 SARVAM_DEFAULT_MODEL = os.getenv("SARVAM_MODEL", "bulbul:v1")
 SARVAM_SAMPLE_RATE = 8000  # 8 kHz for telephony
 SARVAM_NUM_CHANNELS = 1
+VALID_SARVAM_SPEAKERS = {"meera", "pavithra", "maitreyi", "arvind", "amol", "amartya"}
+
+
+def normalize_sarvam_speaker(voice: Optional[str]) -> str:
+    if voice in VALID_SARVAM_SPEAKERS:
+        return voice
+    return SARVAM_DEFAULT_VOICE
+
+
+def normalize_sarvam_model(model: Optional[str]) -> str:
+    if model and model != "sarvam":
+        return model
+    return SARVAM_DEFAULT_MODEL
 
 
 class SarvamTTS(TTS):
@@ -46,9 +59,9 @@ class SarvamTTS(TTS):
             sample_rate=sample_rate,
             num_channels=num_channels,
         )
-        self._voice = voice or SARVAM_DEFAULT_VOICE
+        self._voice = normalize_sarvam_speaker(voice or SARVAM_DEFAULT_VOICE)
         self._language = language or SARVAM_DEFAULT_LANGUAGE
-        self._model = model or SARVAM_DEFAULT_MODEL
+        self._model = normalize_sarvam_model(model or SARVAM_DEFAULT_MODEL)
         self._api_key = api_key or os.getenv("SARVAM_API_KEY", "")
         self._api_url = api_url or SARVAM_API_URL
 
@@ -114,16 +127,24 @@ class _SarvamChunkedStream(ChunkedStream):
             mime_type="audio/pcm",
         )
 
+        speaker = normalize_sarvam_speaker(self._voice)
+        model = normalize_sarvam_model(self._model)
+        if speaker != self._voice:
+            logger.warning("Unsupported Sarvam speaker '%s' - falling back to '%s'", self._voice, speaker)
+        if model != self._model:
+            logger.warning("Unsupported Sarvam model '%s' - falling back to '%s'", self._model, model)
+
         payload = {
             "inputs": [self._input_text],
             "target_language_code": self._language,
-            "speaker": self._voice,
-            "model": self._model,
+            "speaker": speaker,
+            "model": model,
             "pitch": 0,
             "pace": 1.0,
             "loudness": 1.5,
             "speech_sample_rate": self._tts.sample_rate,
             "enable_preprocessing": True,
+            "override_triplets": {},
         }
         headers = {
             "api-subscription-key": self._api_key,
@@ -137,6 +158,8 @@ class _SarvamChunkedStream(ChunkedStream):
                 headers=headers,
                 timeout=self._conn_options.timeout,
             )
+            if response.is_error:
+                logger.error("Sarvam TTS request failed with status %s: %s", response.status_code, response.text)
             response.raise_for_status()
 
         # Sarvam returns JSON with base64-encoded audio

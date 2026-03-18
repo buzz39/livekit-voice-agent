@@ -72,3 +72,14 @@ UPDATE ai_configs
 SET llm_model = 'llama-3.3-70b-versatile',
     llm_provider = 'groq'
 WHERE llm_model = 'gpt-5-nano';
+
+-- Fix: replace legacy Sarvam values that cause 400 Bad Request responses
+UPDATE ai_configs
+SET tts_voice = 'meera'
+WHERE tts_provider = 'sarvam'
+    AND LOWER(COALESCE(tts_voice, '')) = 'sarah';
+
+UPDATE ai_configs
+SET tts_model = 'bulbul:v1'
+WHERE tts_provider = 'sarvam'
+    AND COALESCE(tts_model, '') IN ('', 'sarvam');
