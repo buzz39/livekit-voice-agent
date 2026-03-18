@@ -22,7 +22,7 @@ This deployment is wired to the following infrastructure:
 Both `outbound_agent.py` and `telephony_agent.py` register with LiveKit as `voice-assistant`. This matches the inbound dispatch rule configured in LiveKit Cloud.
 
 ### Outbound Trunk
-The outbound SIP dialer (`outbound/sip.py`) reads the trunk ID from `LIVEKIT_OUTBOUND_TRUNK_ID` env var (falls back to legacy `SIP_TRUNK_ID`). Set it to `ST_nVvG7n8BpJd3`.
+The outbound SIP dialer (`outbound/sip.py`) reads the trunk ID from `LIVEKIT_SIP_TRUNK_ID` first, then falls back to `LIVEKIT_OUTBOUND_TRUNK_ID` and legacy `SIP_TRUNK_ID`. Set it to `ST_nVvG7n8BpJd3` for the Vobiz outbound trunk.
 
 ### Quick Start
 Copy `.env.example` to `.env` — it already contains the Vobiz + LiveKit credentials.
@@ -140,6 +140,9 @@ DEEPGRAM_API_KEY=your-deepgram-api-key # Deepgram API Key (also used for STT)
 SARVAM_API_KEY=your_sarvam_api_key # Get from Sarvam AI dashboard
 CARTESIA_API_KEY=sk_car_your-cartesia-api-key # Get from Cartesia
 TTS_PROVIDER=cartesia # or sarvam or deepgram (defaults to cartesia, configurable in UI)
+
+# SIP Configuration
+LIVEKIT_SIP_TRUNK_ID=ST_nVvG7n8BpJd3 # Vobiz Outbound Trunk
 ```
 
 ## 📸 Screenshots
@@ -158,7 +161,7 @@ If the phone call answers but nobody hears the bot, check the outbound worker lo
 
 For the default outbound stack in this repository, verify these environment variables first:
 
-- `LIVEKIT_OUTBOUND_TRUNK_ID`
+- `LIVEKIT_SIP_TRUNK_ID` (preferred) or `LIVEKIT_OUTBOUND_TRUNK_ID`
 - `SIP_FROM_NUMBER`
 - `OPENAI_API_KEY` or `GROQ_API_KEY` for the selected LLM
 - `DEEPGRAM_API_KEY` for STT

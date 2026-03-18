@@ -15,6 +15,7 @@ from livekit.protocol.room import CreateRoomRequest
 from dotenv import load_dotenv
 from neon_db import get_db, NeonDB
 from audio_router import audio_router
+from outbound.sip import get_sip_trunk_id
 
 # Load environment variables
 load_dotenv()
@@ -57,7 +58,6 @@ app.add_middleware(
 
 # Configuration
 ROOM_NAME_PREFIX = "outbound-call-"
-SIP_TRUNK_ID = os.getenv("SIP_TRUNK_ID", "ST_nVvG7n8BpJd3") # Default from existing code
 SIP_FROM_NUMBER = os.getenv("SIP_FROM_NUMBER", "+12029787305") # Default from existing code
 API_BASE_URL = os.getenv("API_BASE_URL", "").rstrip("/")  # e.g. https://livekit-outbound-api.tinysaas.fun
 
@@ -163,7 +163,7 @@ async def initiate_outbound_call(request: OutboundCallRequest):
 
         # Step 3: Create SIP participant — THIS actually dials the phone
         try:
-            sip_trunk_id = os.getenv("LIVEKIT_OUTBOUND_TRUNK_ID", SIP_TRUNK_ID)
+            sip_trunk_id = get_sip_trunk_id()
             sip_participant = await lk.sip.create_sip_participant(
                 CreateSIPParticipantRequest(
                     sip_trunk_id=sip_trunk_id,
