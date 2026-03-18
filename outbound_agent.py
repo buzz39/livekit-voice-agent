@@ -26,7 +26,7 @@ from outbound.sip import dial_participant
 from outbound.tools import create_tools
 from outbound.recording import start_recording
 from outbound.lifecycle import finalize_call as finalize_call_logic
-from outbound.providers import build_llm, build_stt, build_tts
+from outbound.providers import build_llm, build_stt, build_tts, get_missing_provider_env_vars, resolve_ai_configuration
 
 # Whispey Observability Integration
 try:
@@ -106,6 +106,40 @@ async def entrypoint(ctx: JobContext):
 
     # AI Config
     ai_config = await load_ai_config(db, agent_slug)
+    resolved_ai_config = resolve_ai_configuration(ai_config=ai_config, metadata_overrides=initial_metadata)
+    logger.info(
+        "Resolved outbound AI pipeline: llm=%s/%s temp=%s, stt=%s/%s, tts=%s/%s voice=%s",
+        resolved_ai_config["llm_provider"],
+        resolved_ai_config["llm_model"],
+        resolved_ai_config["llm_temperature"],
+        resolved_ai_config["stt_provider"],
+        f'{resolved_ai_config["stt_model"]}/{resolved_ai_config["stt_language"]}',
+        resolved_ai_config["tts_provider"],
+        resolved_ai_config["tts_model"],
+        resolved_ai_config["tts_voice"],
+    )
+    missing_provider_env_vars = get_missing_provider_env_vars(ai_config=ai_config, metadata_overrides=initial_metadata)
+    if missing_provider_env_vars:
+        error_message = (
+            "Cannot start outbound audio pipeline because required provider credentials are missing: "
+            + ", ".join(missing_provider_env_vars)
+        )
+        call_metadata["notes"].append(error_message)
+        logger.error(error_message)
+        try:
+            await dispatcher.dispatch(
+                "call.failed",
+                {
+                    "phone_number": phone_number,
+                    "business_name": business_name,
+                    "agent_slug": agent_slug,
+                    "stage": "provider_validation",
+                    "error": error_message,
+                },
+            )
+        except Exception as e:
+            logger.debug(f"call.failed webhook error during provider validation: {e}")
+        return
 
     # Initialize Whispey observability if enabled
     whispey = None
@@ -210,6 +244,7 @@ async def entrypoint(ctx: JobContext):
 
 
     # 5. Start Session ASYNCHRONOUSLY (Critical for latency)
+    logger.info("Starting LiveKit agent session")
     session_start_task = asyncio.create_task(session.start(agent=agent, room=ctx.room))
 
     # 6. Dial the user (SIP)
@@ -235,7 +270,9 @@ async def entrypoint(ctx: JobContext):
     logger.info(f"Final Opening Line: '{opening_line}'")
     
     # Ensure session is started before speaking
+    logger.info("Waiting for LiveKit agent session to finish startup before sending opening line")
     await session_start_task
+    logger.info("LiveKit agent session is ready; sending opening line")
     
     try:
         await session.say(opening_line, allow_interruptions=True)

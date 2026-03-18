@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from outbound.providers import build_llm, build_stt, build_tts
+from outbound.providers import build_llm, build_stt, build_tts, get_missing_provider_env_vars, resolve_ai_configuration
 
 
 def test_build_llm_uses_metadata_override_for_groq():
@@ -43,3 +43,59 @@ def test_build_tts_supports_cartesia_with_voice_override():
 
     assert tts is tts_instance
     mock_tts.assert_called_once_with(model="sonic-2", voice="room-voice")
+
+
+def test_resolve_ai_configuration_reports_effective_pipeline():
+    ai_config = {
+        "llm_provider": "openai",
+        "llm_model": "gpt-4o-mini",
+        "llm_temperature": 0.4,
+        "stt_model": "nova-3",
+        "stt_language": "en-US",
+        "tts_provider": "cartesia",
+        "tts_model": "sonic-2",
+        "tts_voice": "db-voice",
+    }
+    metadata = {"llm_provider": "groq", "llm_model": "llama-3.3-70b-versatile", "voice_id": "room-voice"}
+
+    with patch.dict("os.environ", {"GROQ_API_KEY": "test-key"}, clear=False):
+        resolved = resolve_ai_configuration(ai_config=ai_config, metadata_overrides=metadata)
+
+    assert resolved == {
+        "llm_provider": "groq",
+        "llm_model": "llama-3.3-70b-versatile",
+        "llm_temperature": 0.4,
+        "stt_provider": "deepgram",
+        "stt_model": "nova-3",
+        "stt_language": "en-US",
+        "tts_provider": "cartesia",
+        "tts_model": "sonic-2",
+        "tts_voice": "room-voice",
+    }
+
+
+def test_get_missing_provider_env_vars_lists_selected_provider_keys():
+    ai_config = {
+        "llm_provider": "groq",
+        "stt_model": "nova-3",
+        "stt_language": "en-US",
+        "tts_provider": "cartesia",
+    }
+
+    with patch.dict("os.environ", {}, clear=True):
+        missing = get_missing_provider_env_vars(ai_config=ai_config)
+
+    assert missing == ["CARTESIA_API_KEY", "DEEPGRAM_API_KEY", "GROQ_API_KEY"]
+
+
+def test_get_missing_provider_env_vars_uses_available_credentials():
+    ai_config = {"llm_provider": "openai", "tts_provider": "deepgram"}
+
+    with patch.dict(
+        "os.environ",
+        {"OPENAI_API_KEY": "test-openai", "DEEPGRAM_API_KEY": "test-deepgram"},
+        clear=True,
+    ):
+        missing = get_missing_provider_env_vars(ai_config=ai_config)
+
+    assert missing == []

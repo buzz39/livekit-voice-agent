@@ -146,6 +146,24 @@ TTS_PROVIDER=cartesia # or sarvam or deepgram (defaults to cartesia, configurabl
 
 > *Screenshots coming soon*
 
+## 🔍 Troubleshooting: call connects but there is dead air
+
+If the phone call answers but nobody hears the bot, check the outbound worker logs in this order:
+
+1. `Call answered!` from `outbound/sip.py` confirms the SIP leg connected.
+2. `Resolved outbound AI pipeline: ...` shows which LLM/STT/TTS providers and models were selected for that call.
+3. `Cannot start outbound audio pipeline because required provider credentials are missing: ...` means the call would have been silent because the selected provider API keys were not configured.
+4. `Waiting for LiveKit agent session to finish startup before sending opening line` followed by `LiveKit agent session is ready; sending opening line` confirms the agent session actually became ready before TTS playback.
+5. `Failed to play opening line: ...` points to TTS/playback issues after the SIP leg and agent session were both up.
+
+For the default outbound stack in this repository, verify these environment variables first:
+
+- `LIVEKIT_OUTBOUND_TRUNK_ID`
+- `SIP_FROM_NUMBER`
+- `OPENAI_API_KEY` or `GROQ_API_KEY` for the selected LLM
+- `DEEPGRAM_API_KEY` for STT
+- `OPENAI_API_KEY`, `CARTESIA_API_KEY`, `DEEPGRAM_API_KEY`, or `INWORLD_API_KEY` for the selected TTS provider
+
 ## 📁 Project Structure
 
 ```
