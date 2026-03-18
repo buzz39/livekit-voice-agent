@@ -191,7 +191,7 @@ Below is the order of changes I would make, and why each one matters.
 
 ### Phase 2 — India operational readiness
 1. IST business-hour controls
-2. consent + suppression workflows
+2. Consent + suppression workflows
 3. queue-backed dialer
 4. carrier fallback
 5. language routing beyond Hinglish
