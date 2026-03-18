@@ -15,7 +15,7 @@ Keep it conversational, natural, and never pushy. If they're not interested, tha
 
 Opening: "Hello! Main {agent_name} bol rahi hoon, {company_name} se. Aap recently ek residential apartment mein interested the — kya abhi thodi der baat ho sakti hai?"`;
 
-const ConfigPanel = ({ onClose, onSave }) => {
+const ConfigPanel = ({ initialConfig, onClose, onSave }) => {
   const [config, setConfig] = useState({
     company_name: '',
     agent_name: 'Aisha',
@@ -23,6 +23,7 @@ const ConfigPanel = ({ onClose, onSave }) => {
     tts_provider: 'cartesia',
     language: 'hinglish',
     llm_provider: 'openai',
+    ...initialConfig,
   });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -44,7 +45,7 @@ const ConfigPanel = ({ onClose, onSave }) => {
       await saveAgentConfig(config);
       setSaved(true);
       if (onSave) onSave(config);
-    } catch (err) {
+    } catch {
       setError('Failed to save config. Check server connection.');
     } finally {
       setSaving(false);

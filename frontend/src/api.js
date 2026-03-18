@@ -1,6 +1,11 @@
 // Frontend API Client
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://livekit-outbound-api.tinysaas.fun';
+export const apiEvents = new EventTarget();
+
+function emitApiError(message) {
+  apiEvents.dispatchEvent(new CustomEvent('error', { detail: { message } }));
+}
 
 // Helper to get Stack Auth session token
 async function getAuthHeaders() {
@@ -15,7 +20,7 @@ async function getAuthHeaders() {
         }
       }
     }
-  } catch (e) {
+  } catch {
     // Silently fail — auth headers are optional until backend enforces them
   }
   return {};
@@ -41,6 +46,7 @@ export async function getStats() {
     return await response.json();
   } catch (error) {
     console.error("Failed to fetch stats:", error);
+    emitApiError('Unable to load dashboard stats right now.');
     return null;
   }
 }
@@ -52,6 +58,7 @@ export async function getAnalyticsVolume(days = 30) {
     return await response.json();
   } catch (error) {
     console.error("Failed to fetch analytics:", error);
+    emitApiError('Unable to load analytics right now.');
     return [];
   }
 }
@@ -69,6 +76,7 @@ export async function getRecentCalls(limit = 10) {
     });
   } catch (error) {
     console.error("Failed to fetch calls:", error);
+    emitApiError('Unable to load recent calls right now.');
     return [];
   }
 }
@@ -80,6 +88,7 @@ export async function getAppointments() {
     return await response.json();
   } catch (error) {
     console.error("Failed to fetch appointments:", error);
+    emitApiError('Unable to load appointments right now.');
     return [];
   }
 }
@@ -91,6 +100,7 @@ export const getAllPrompts = async () => {
     return await response.json();
   } catch (error) {
     console.error('Error fetching prompts:', error);
+    emitApiError('Unable to load prompts right now.');
     return [];
   }
 };
@@ -102,6 +112,7 @@ export const getActivePrompt = async (name = "default_roofing_agent") => {
     return await response.json();
   } catch (error) {
     console.error('Error fetching prompt:', error);
+    emitApiError('Unable to load the current prompt right now.');
     return null;
   }
 };
@@ -131,6 +142,7 @@ export async function getCallDetails(callId) {
     return data;
   } catch (error) {
     console.error(`Failed to fetch call details for ${callId}:`, error);
+    emitApiError('Unable to load call details right now.');
     return null;
   }
 }

@@ -1,30 +1,75 @@
-import React, { useState } from 'react';
-import { Phone, MicOff, PhoneOff, Settings } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Phone, PhoneOff, Settings } from 'lucide-react';
 import ConfigPanel from './ConfigPanel';
+import { saveAgentConfig } from '../../api';
+
+const AGENT_CONFIG_STORAGE_KEY = 'aisha-agent-config';
+const DEFAULT_AGENT_SLUG = 'default_roofing_agent';
+
+const normalizePhoneNumber = (value) => value.replace(/[^\d+]/g, '');
+
+const isValidE164PhoneNumber = (value) => /^\+[1-9]\d{7,14}$/.test(value);
 
 const ActiveCallPanel = ({ status, onStartCall, onEndCall }) => {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [showConfig, setShowConfig] = useState(false);
-  const [agentConfig, setAgentConfig] = useState(null); // saved config from ConfigPanel
+  const [agentConfig, setAgentConfig] = useState(() => {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+
+    try {
+      const savedConfig = window.localStorage.getItem(AGENT_CONFIG_STORAGE_KEY);
+      return savedConfig ? JSON.parse(savedConfig) : null;
+    } catch (error) {
+      console.error('Failed to restore saved agent config:', error);
+      return null;
+    }
+  });
+  const [callError, setCallError] = useState('');
 
   const isCallActive = status === 'active';
   const isConnecting = status === 'connecting';
+  const normalizedPhoneNumber = useMemo(() => normalizePhoneNumber(phoneNumber.trim()), [phoneNumber]);
+  const hasPhoneNumber = normalizedPhoneNumber.length > 0;
+  const phoneError = hasPhoneNumber && !isValidE164PhoneNumber(normalizedPhoneNumber)
+    ? 'Use international format, for example +14155552671.'
+    : '';
 
   const handleConfigSaved = (config) => {
     setAgentConfig(config);
-    // Don't auto-close — user sees the "Saved" state and can close manually
+    setCallError('');
+
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(AGENT_CONFIG_STORAGE_KEY, JSON.stringify(config));
+    }
   };
 
-  const handleStartCall = () => {
-    if (!phoneNumber) return;
-    // Pass agentConfig (company_name, agent_name, etc.) alongside phone number
-    onStartCall(phoneNumber, agentConfig?.company_name || '', agentConfig?.agent_slug || 'default_roofing_agent');
+  const handleStartCall = async () => {
+    if (!hasPhoneNumber || phoneError) return;
+
+    setCallError('');
+
+    try {
+      if (agentConfig) {
+        await saveAgentConfig(agentConfig);
+      }
+
+      await onStartCall(
+        normalizedPhoneNumber,
+        agentConfig?.company_name || '',
+        agentConfig?.agent_slug || DEFAULT_AGENT_SLUG
+      );
+    } catch (error) {
+      setCallError(error?.message || 'Unable to start the call right now.');
+    }
   };
 
   return (
     <>
       {showConfig && (
         <ConfigPanel
+          initialConfig={agentConfig}
           onClose={() => setShowConfig(false)}
           onSave={handleConfigSaved}
         />
@@ -49,20 +94,29 @@ const ActiveCallPanel = ({ status, onStartCall, onEndCall }) => {
               {agentConfig?.company_name && (
                 <div className="text-slate-400 text-sm">Agent: {agentConfig.agent_name || 'Aisha'} · {agentConfig.company_name}</div>
               )}
-              <div className="text-slate-500 text-xs">{phoneNumber}</div>
+              <div className="text-slate-500 text-xs">{normalizedPhoneNumber || phoneNumber}</div>
             </div>
           ) : (
             <div className="w-full space-y-3">
-              {/* Phone number input */}
               <input
                 type="tel"
-                placeholder="Enter phone number..."
+                placeholder="e.g. +14155552671"
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 value={phoneNumber}
-                onChange={(e) => setPhoneNumber(e.target.value)}
+                onChange={(e) => {
+                  setPhoneNumber(e.target.value);
+                  setCallError('');
+                }}
               />
+              <p className="text-xs text-slate-500">
+                Enter the customer number in E.164 format so the call can be routed correctly.
+              </p>
+              {phoneError && (
+                <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+                  {phoneError}
+                </div>
+              )}
 
-              {/* Config summary (if saved) */}
               {agentConfig && (
                 <div className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm">
                   <div className="flex justify-between items-center">
@@ -92,7 +146,6 @@ const ActiveCallPanel = ({ status, onStartCall, onEndCall }) => {
                 </div>
               )}
 
-              {/* Configure agent button (if not yet configured) */}
               {!agentConfig && (
                 <button
                   onClick={() => setShowConfig(true)}
@@ -103,11 +156,16 @@ const ActiveCallPanel = ({ status, onStartCall, onEndCall }) => {
                 </button>
               )}
 
-              {/* Start call button */}
+              {callError && (
+                <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                  {callError}
+                </div>
+              )}
+
               <button
                 onClick={handleStartCall}
                 className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={!phoneNumber || isConnecting}
+                disabled={!hasPhoneNumber || Boolean(phoneError) || isConnecting}
               >
                 <Phone size={18} />
                 {isConnecting ? 'Connecting...' : 'Start Outbound Call'}
@@ -117,14 +175,13 @@ const ActiveCallPanel = ({ status, onStartCall, onEndCall }) => {
         </div>
 
         {isCallActive && (
-          <div className="grid grid-cols-2 gap-3">
-            <button className="bg-slate-800 hover:bg-slate-700 text-white p-3 rounded-lg flex items-center justify-center gap-2 transition-colors">
-              <MicOff size={18} />
-              Mute
-            </button>
+          <div className="space-y-3">
+            <div className="rounded-lg border border-slate-700 bg-slate-800/70 px-4 py-3 text-sm text-slate-300">
+              The live transcript refreshes automatically every few seconds while the call is running.
+            </div>
             <button
               onClick={onEndCall}
-              className="bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 p-3 rounded-lg flex items-center justify-center gap-2 transition-colors"
+              className="w-full bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 p-3 rounded-lg flex items-center justify-center gap-2 transition-colors"
             >
               <PhoneOff size={18} />
               End Call

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import { useUser, useStackApp, SignIn, SignUp } from '@stackframe/react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useUser, SignIn, SignUp } from '@stackframe/react';
 import DashboardLayout from './components/layout/DashboardLayout';
 import Terminal from './components/dashboard/Terminal';
 import StatsCard from './components/dashboard/StatsCard';
@@ -11,7 +11,7 @@ import CallLogs from './components/dashboard/CallLogs';
 import Analytics from './components/dashboard/Analytics';
 import Calendar from './components/dashboard/Calendar';
 import LandingPage from './pages/LandingPage';
-import { getStats, getRecentCalls, startOutboundCall } from './api';
+import { apiEvents, getStats, getRecentCalls, startOutboundCall } from './api';
 
 // Protected route wrapper
 const ProtectedRoute = ({ children }) => {
@@ -72,6 +72,24 @@ function Dashboard() {
   const [stats, setStats] = useState(null);
   const [recentCalls, setRecentCalls] = useState([]);
   const [riskLevel, setRiskLevel] = useState('low');
+  const [bannerMessage, setBannerMessage] = useState('');
+
+  useEffect(() => {
+    let timeoutId;
+
+    const handleApiError = (event) => {
+      setBannerMessage(event.detail?.message || 'Something went wrong. Please try again.');
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => setBannerMessage(''), 5000);
+    };
+
+    apiEvents.addEventListener('error', handleApiError);
+
+    return () => {
+      clearTimeout(timeoutId);
+      apiEvents.removeEventListener('error', handleApiError);
+    };
+  }, []);
 
   useEffect(() => {
     async function fetchData() {
@@ -164,6 +182,12 @@ function Dashboard() {
 
   return (
     <DashboardLayout activeTab={currentView} onTabChange={setCurrentView}>
+      {bannerMessage && (
+        <div className="mb-6 rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          {bannerMessage}
+        </div>
+      )}
+
       {currentView === 'command-center' && (
         <div className="grid grid-cols-12 gap-6 h-[calc(100vh-6rem)]">
           <div className="col-span-12 grid grid-cols-1 md:grid-cols-4 gap-6 h-32 md:h-40">
@@ -178,7 +202,7 @@ function Dashboard() {
 
           <div className="col-span-12 md:col-span-8 h-full flex flex-col gap-6" style={{ height: 'calc(100% - 11rem)' }}>
             <div className="flex-1 min-h-0">
-              <Terminal logs={logs} />
+              <Terminal logs={logs} status={callStatus} />
             </div>
           </div>
 

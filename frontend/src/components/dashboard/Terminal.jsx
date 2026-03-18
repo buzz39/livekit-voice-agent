@@ -1,7 +1,19 @@
 import React, { useRef, useEffect } from 'react';
 import { Terminal as TerminalIcon } from 'lucide-react';
 
-const Terminal = ({ logs = [] }) => {
+const getEmptyStateMessage = (status) => {
+  if (status === 'connecting') {
+    return 'Connecting the call and waiting for the first transcript...';
+  }
+
+  if (status === 'active') {
+    return 'The call is live. New transcript lines will appear here automatically.';
+  }
+
+  return 'No active call yet. Start an outbound call to see the live transcript.';
+};
+
+const Terminal = ({ logs = [], status = 'idle' }) => {
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -24,7 +36,7 @@ const Terminal = ({ logs = [] }) => {
 
       <div className="flex-1 p-4 overflow-y-auto font-mono text-sm space-y-3 bg-black/50">
         {logs.length === 0 ? (
-            <div className="text-slate-600 italic text-center mt-10">Waiting for call connection...</div>
+            <div className="text-slate-600 italic text-center mt-10">{getEmptyStateMessage(status)}</div>
         ) : (
             logs.map((log, index) => (
             <div key={index} className="flex gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
