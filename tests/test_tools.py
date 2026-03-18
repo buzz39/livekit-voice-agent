@@ -101,3 +101,65 @@ async def test_tools_end_call():
     await asyncio.sleep(0.01)
 
     mock_hangup.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_transfer_call_formats_plain_number_with_sip_domain():
+    call_metadata = {"notes": []}
+    mock_db = AsyncMock()
+    mock_dispatcher = AsyncMock()
+    mock_hangup = AsyncMock()
+    mock_ctx = MagicMock()
+    mock_ctx.room.name = "room-123"
+    mock_ctx.room.remote_participants = {}
+    mock_ctx.api.sip.transfer_sip_participant = AsyncMock()
+
+    tools = create_tools(
+        call_metadata,
+        mock_db,
+        mock_dispatcher,
+        "contact_123",
+        "+15550000000",
+        mock_hangup,
+        ctx=mock_ctx,
+        sip_domain="demo.sip.test",
+    )
+
+    transfer_call_tool = next(t for t in tools if t.__name__ == "transfer_call")
+
+    result = await transfer_call_tool(destination="+15551112222")
+
+    assert result == "Transfer initiated successfully."
+    request = mock_ctx.api.sip.transfer_sip_participant.await_args.args[0]
+    assert request.room_name == "room-123"
+    assert request.participant_identity == "sip_+15550000000"
+    assert request.transfer_to == "sip:+15551112222@demo.sip.test"
+
+@pytest.mark.asyncio
+async def test_transfer_call_uses_default_tel_destination_without_sip_domain():
+    call_metadata = {"notes": []}
+    mock_db = AsyncMock()
+    mock_dispatcher = AsyncMock()
+    mock_hangup = AsyncMock()
+    mock_ctx = MagicMock()
+    mock_ctx.room.name = "room-456"
+    mock_ctx.room.remote_participants = {}
+    mock_ctx.api.sip.transfer_sip_participant = AsyncMock()
+
+    tools = create_tools(
+        call_metadata,
+        mock_db,
+        mock_dispatcher,
+        "contact_123",
+        "+15550000000",
+        mock_hangup,
+        ctx=mock_ctx,
+        default_transfer_destination="+15553334444",
+    )
+
+    transfer_call_tool = next(t for t in tools if t.__name__ == "transfer_call")
+
+    result = await transfer_call_tool()
+
+    assert result == "Transfer initiated successfully."
+    request = mock_ctx.api.sip.transfer_sip_participant.await_args.args[0]
+    assert request.transfer_to == "tel:+15553334444"

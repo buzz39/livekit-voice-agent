@@ -40,6 +40,7 @@ Copy `.env.example` to `.env` — it already contains the Vobiz + LiveKit creden
 - 🖥️ **Configurable UI** — Manage LLM and TTS providers directly from the React dashboard.
 - 📞 **Dual Voice Agents** — Separate inbound and outbound call handling
 - 📡 **SIP Telephony Integration** — Connect to real phone networks
+- 🔀 **Live Call Transfers** — Hand active SIP calls off to a human or another destination
 - 🗄️ **Database-Driven Config** — Agent behavior configured via Neon PostgreSQL, no redeployment needed
 - 🔗 **MCP Integration** — Extend agents with n8n workflows via Model Context Protocol
 - 🔧 **Extensible Function Tools** — Plug in custom capabilities per agent

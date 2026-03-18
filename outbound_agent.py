@@ -168,7 +168,8 @@ async def entrypoint(ctx: JobContext):
         dispatcher=dispatcher,
         contact_id=contact_id,
         phone_number=phone_number,
-        hangup_callback=hangup_call
+        hangup_callback=hangup_call,
+        ctx=ctx,
     )
 
     agent = Agent(instructions=agent_instructions, tools=all_tools)
