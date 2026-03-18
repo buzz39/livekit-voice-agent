@@ -27,7 +27,6 @@ from outbound.tools import create_tools
 from outbound.recording import start_recording
 from outbound.lifecycle import finalize_call as finalize_call_logic
 from outbound.providers import (
-    build_custom_tts_generator,
     build_llm,
     build_stt,
     build_tts,
@@ -230,7 +229,6 @@ async def _run_entrypoint(ctx: JobContext):
         llm = build_llm(ai_config=ai_config, metadata_overrides=initial_metadata)
         stt = build_stt(ai_config=ai_config, metadata_overrides=initial_metadata)
         tts = build_tts(ai_config=ai_config, metadata_overrides=initial_metadata)
-        custom_tts_generator = build_custom_tts_generator(ai_config=ai_config, metadata_overrides=initial_metadata)
     except Exception as e:
         error_message = (
             "Failed to initialize outbound AI providers "
@@ -269,20 +267,6 @@ async def _run_entrypoint(ctx: JobContext):
         tts=tts
     )
 
-    if custom_tts_generator:
-        # LiveKit's current AgentSession API still requires a TTS object at construction
-        # time, so Sarvam hooks in through the same private generator override already
-        # used by the legacy telephony agent in this repository.
-        if hasattr(session, "_generate_speech"):
-            session._generate_speech = custom_tts_generator
-            logger.info("Overrode session speech generation for %s TTS", resolved_ai_config["tts_provider"])
-        else:
-            logger.error(
-                "AgentSession has no '_generate_speech' attribute — custom %s TTS cannot be applied. "
-                "The session will fall back to the placeholder OpenAI TTS. "
-                "Upgrade or patch the Sarvam integration to match the current livekit-agents SDK.",
-                resolved_ai_config["tts_provider"],
-            )
 
     # Start Whispey session tracking with metadata
     session_id = None

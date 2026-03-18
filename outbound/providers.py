@@ -6,10 +6,10 @@ import httpx
 from livekit.plugins import cartesia, deepgram, inworld, openai
 
 import config as default_config
+from outbound.sarvam_tts import SarvamTTS
 
 logger = logging.getLogger("outbound.providers")
 
-SARVAM_API_URL = os.getenv("SARVAM_API_URL", "https://api.sarvam.ai/v1/tts")
 SARVAM_TTS_VOICE = os.getenv("SARVAM_VOICE_ID", "saarika:v2.5")
 SARVAM_PLACEHOLDER_MODEL = "sarvam"
 
@@ -19,7 +19,7 @@ _REQUIRED_ENV_VARS = {
     "deepgram": ("DEEPGRAM_API_KEY",),
     "cartesia": ("CARTESIA_API_KEY",),
     "inworld": ("INWORLD_API_KEY",),
-    "sarvam": ("SARVAM_API_KEY", "OPENAI_API_KEY"),  # OpenAI needed for placeholder TTS at session init
+    "sarvam": ("SARVAM_API_KEY",),
 }
 
 
@@ -205,55 +205,9 @@ def build_tts(ai_config: Dict[str, Any], metadata_overrides: Optional[Dict[str, 
         return inworld.TTS(voice=voice)
 
     if provider == "sarvam":
-        logger.info(f"Using Sarvam TTS via custom generator: {voice}")
-        # AgentSession still expects a TTS object at construction time; outbound_agent
-        # swaps in the real Sarvam PCM generator immediately after the session is built.
-        return openai.TTS(model=default_config.OPENAI_TTS_MODEL, voice=default_config.OPENAI_TTS_VOICE)
+        logger.info(f"Using Sarvam TTS: {voice}")
+        return SarvamTTS(voice=voice)
 
     logger.info(f"Using OpenAI TTS: {model}/{voice}")
     return openai.TTS(model=model, voice=voice)
 
-
-async def sarvam_tts(text: str, voice_id: Optional[str] = None) -> bytes:
-    api_key = os.getenv("SARVAM_API_KEY")
-    if not api_key:
-        logger.error("SARVAM_API_KEY environment variable is not set")
-        raise ValueError("SARVAM_API_KEY environment variable is not set.")
-
-    payload = {
-        "text": text,
-        "voice": voice_id or SARVAM_TTS_VOICE,
-        "response_format": "pcm",
-        "sample_rate": 16000,
-    }
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(SARVAM_API_URL, json=payload, headers=headers, timeout=10.0)
-            response.raise_for_status()
-        except httpx.RequestError as exc:
-            logger.error("Network error while requesting Sarvam TTS (%s): %s", type(exc).__name__, exc)
-            raise
-        except httpx.HTTPStatusError as exc:
-            logger.error(
-                f"Sarvam TTS HTTP error for {exc.request.url}: {exc.response.status_code} - {exc.response.text}"
-            )
-            raise
-
-    return response.content
-
-
-def build_custom_tts_generator(
-    ai_config: Dict[str, Any], metadata_overrides: Optional[Dict[str, Any]] = None
-):
-    resolved = resolve_ai_configuration(ai_config=ai_config, metadata_overrides=metadata_overrides)
-    if resolved["tts_provider"] != "sarvam":
-        return None
-
-    voice = resolved["tts_voice"]
-
-    async def generate_sarvam_speech(text: str) -> bytes:
-        return await sarvam_tts(text=text, voice_id=voice)
-
-    return generate_sarvam_speech

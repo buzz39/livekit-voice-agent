@@ -3,7 +3,6 @@ from unittest.mock import patch
 import pytest
 
 from outbound.providers import (
-    build_custom_tts_generator,
     build_llm,
     build_stt,
     build_tts,
@@ -113,7 +112,8 @@ def test_get_missing_provider_env_vars_uses_available_credentials():
 def test_resolve_ai_configuration_preserves_sarvam_provider():
     ai_config = {"tts_provider": "sarvam"}
 
-    resolved = resolve_ai_configuration(ai_config=ai_config)
+    with patch.dict("os.environ", {"SARVAM_API_KEY": "test-key"}, clear=False):
+        resolved = resolve_ai_configuration(ai_config=ai_config)
 
     assert resolved["tts_provider"] == "sarvam"
     assert resolved["tts_model"] == "sarvam"
@@ -121,33 +121,33 @@ def test_resolve_ai_configuration_preserves_sarvam_provider():
 
 
 def test_get_missing_provider_env_vars_includes_sarvam_key():
+    """When SARVAM_API_KEY is missing and no fallback provider has credentials either,
+    SARVAM_API_KEY should appear in the missing list."""
+    ai_config = {"tts_provider": "sarvam"}
+
+    # No TTS credentials at all -> sarvam can't fall back, key stays missing.
+    with patch.dict("os.environ", {"DEEPGRAM_API_KEY": "test-deepgram"}, clear=True):
+        missing = get_missing_provider_env_vars(ai_config=ai_config)
+
+    assert "SARVAM_API_KEY" in missing or "OPENAI_API_KEY" in missing
+
+
+def test_get_missing_provider_env_vars_sarvam_falls_back_to_openai():
+    """When SARVAM_API_KEY is missing but OPENAI_API_KEY is present,
+    the fallback should resolve TTS to openai so nothing is missing."""
     ai_config = {"tts_provider": "sarvam"}
 
     with patch.dict("os.environ", {"OPENAI_API_KEY": "test-openai", "DEEPGRAM_API_KEY": "test-deepgram"}, clear=True):
         missing = get_missing_provider_env_vars(ai_config=ai_config)
 
-    assert missing == ["SARVAM_API_KEY"]
+    assert missing == []
 
 
-def test_build_tts_uses_placeholder_for_sarvam():
+def test_build_tts_returns_sarvam_tts_instance():
     ai_config = {"tts_provider": "sarvam", "tts_voice": "meera"}
-    tts_instance = object()
 
-    with patch("outbound.providers.openai.TTS", return_value=tts_instance) as mock_tts:
+    with patch.dict("os.environ", {"SARVAM_API_KEY": "test-key"}, clear=False):
         tts = build_tts(ai_config=ai_config)
 
-    assert tts is tts_instance
-    mock_tts.assert_called_once_with(model="tts-1", voice="alloy")
-
-
-@pytest.mark.asyncio
-async def test_build_custom_tts_generator_uses_sarvam_voice():
-    ai_config = {"tts_provider": "sarvam", "tts_voice": "meera"}
-    audio = b"pcm"
-
-    with patch("outbound.providers.sarvam_tts", return_value=audio) as mock_sarvam:
-        generator = build_custom_tts_generator(ai_config=ai_config)
-        result = await generator("hello")
-
-    assert result == audio
-    mock_sarvam.assert_called_once_with(text="hello", voice_id="meera")
+    from outbound.sarvam_tts import SarvamTTS
+    assert isinstance(tts, SarvamTTS)

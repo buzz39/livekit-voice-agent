@@ -28,6 +28,7 @@ from livekit.agents import (
 )
 from livekit.agents.llm import function_tool
 from livekit.plugins import deepgram, openai, cartesia, silero
+from outbound.sarvam_tts import SarvamTTS
 import groq # Import Groq library
 
 DEEPGRAM_TTS_URL = os.environ.get("DEEPGRAM_TTS_URL", "https://api.deepgram.com/v1/speak")
@@ -469,8 +470,7 @@ async def entrypoint(ctx: JobContext):
         )
     elif ai_config["tts_provider"] == "sarvam":
         logger.info(f"Using Sarvam TTS based on database config")
-        # Placeholder, actual call will be custom
-        tts = openai.TTS(model="tts-1", voice="alloy")
+        tts = SarvamTTS(voice=ai_config.get("tts_voice"))
     elif ai_config["tts_provider"] == "deepgram":
         logger.info(f"Using Deepgram TTS based on database config")
         # Placeholder, actual call will be custom
@@ -488,16 +488,8 @@ async def entrypoint(ctx: JobContext):
         tts=tts
     )
     
-    # Override TTS generation for Sarvam or Deepgram if selected
-    if tts_provider_env == "sarvam" or ai_config["tts_provider"] == "sarvam":
-        async def sarvam_generate_speech(text: str) -> bytes:
-            return await sarvam_tts(text)
-        if hasattr(session, "_generate_speech"):
-            session._generate_speech = sarvam_generate_speech
-            logger.info("Overridden session._generate_speech for Sarvam TTS")
-        else:
-            logger.error("AgentSession has no '_generate_speech' — Sarvam TTS override skipped")
-    elif tts_provider_env == "deepgram" or ai_config["tts_provider"] == "deepgram":
+    # Override TTS generation for Deepgram if selected (Sarvam now uses proper plugin)
+    if tts_provider_env == "deepgram" or ai_config["tts_provider"] == "deepgram":
         async def deepgram_generate_speech(text: str) -> bytes:
             return await deepgram_tts(text, voice_id=ai_config.get("tts_voice", DEEPGRAM_TTS_VOICE))
         if hasattr(session, "_generate_speech"):
