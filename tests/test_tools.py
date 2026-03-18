@@ -132,7 +132,7 @@ async def test_transfer_call_formats_plain_number_with_sip_domain():
     assert result == "Transfer initiated successfully."
     request = mock_ctx.api.sip.transfer_sip_participant.await_args.args[0]
     assert request.room_name == "room-123"
-    assert request.participant_identity == "sip_+15550000000"
+    assert request.participant_identity == "15550000000"
     assert request.transfer_to == "sip:+15551112222@demo.sip.test"
 
 @pytest.mark.asyncio

@@ -5,6 +5,12 @@ from typing import Dict, Any
 logger = logging.getLogger("outbound.metadata")
 
 def _parse_metadata(raw_metadata: Any) -> Dict[str, Any]:
+    """
+    Parse JSON metadata from bytes or strings, unwrap nested ``metadata`` payloads, and return a dict.
+
+    When both outer and nested metadata contain the same key, the nested value wins.
+    Invalid or non-dict payloads are treated as empty metadata, and nested parse failures are logged at debug level.
+    """
     if not raw_metadata:
         return {}
 
@@ -25,8 +31,8 @@ def _parse_metadata(raw_metadata: Any) -> Dict[str, Any]:
             if isinstance(nested_metadata, dict):
                 parsed = {**parsed, **nested_metadata}
                 parsed.pop("metadata", None)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[metadata] Failed to parse nested metadata: {e}")
 
     return parsed
 

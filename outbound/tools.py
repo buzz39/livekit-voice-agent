@@ -2,6 +2,7 @@ import datetime
 import logging
 import asyncio
 import os
+import re
 from livekit.agents.llm import function_tool
 from livekit import api
 from typing import Callable, List, Dict, Any, Optional
@@ -34,6 +35,15 @@ def create_tools(
     sip_domain = sip_domain or os.getenv("SIP_DOMAIN") or os.getenv("VOBIZ_SIP_DOMAIN")
     default_transfer_destination = default_transfer_destination or os.getenv("DEFAULT_TRANSFER_NUMBER")
 
+    def _normalize_phone_number(value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        if value.startswith("sip:"):
+            return value
+        return re.sub(r"\D", "", value)
+
+    normalized_phone_number = _normalize_phone_number(phone_number)
+
     def _format_transfer_destination(destination: str) -> str:
         clean_destination = destination.strip()
         if "@" in clean_destination:
@@ -48,10 +58,16 @@ def create_tools(
 
     def _participant_identity() -> Optional[str]:
         if phone_number:
-            return f"sip_{phone_number}"
+            # Keep transfer identity aligned with outbound.sip.dial_participant(), which uses
+            # full SIP URIs for SIP targets and digits-only identities for PSTN numbers.
+            return _normalize_phone_number(phone_number)
         if ctx:
             for participant in ctx.room.remote_participants.values():
-                if participant.identity.startswith("sip_"):
+                if (
+                    participant.identity.startswith("sip_")
+                    or participant.identity.startswith("sip:")
+                    or participant.identity.isdigit()
+                ):
                     return participant.identity
         return None
 
@@ -105,15 +121,25 @@ def create_tools(
     if ctx:
         @function_tool
         async def lookup_user(phone: str) -> str:
-            """Look up the current caller by phone number when it matches the active call."""
-            if phone_number is not None and phone == phone_number:
+            """
+            Return current-call business details when the provided phone matches the active caller.
+
+            If the phone does not match the current call, returns a simple "not found" message.
+            """
+            if _normalize_phone_number(phone) == normalized_phone_number:
                 business_name = call_metadata.get("business_name") or "Unknown business"
                 return f"User found for {phone}: business={business_name}, contact_id={contact_id}."
             return f"No stored details found for {phone}."
 
         @function_tool
         async def transfer_call(destination: Optional[str] = None) -> str:
-            """Transfer the live call to a phone number or SIP URI, defaulting to configured fallback routing."""
+            """
+            Transfer the live call to a phone number or SIP URI.
+
+            If destination is omitted, the configured default transfer destination is used.
+            Returns an error message if no destination is configured, the caller cannot be identified,
+            or the LiveKit SIP transfer request fails.
+            """
             transfer_target = destination or default_transfer_destination
             if not transfer_target:
                 return "No transfer destination is configured."

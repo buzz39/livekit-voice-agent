@@ -3,7 +3,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DEFAULT_LLM_PROVIDER = os.getenv("DEFAULT_LLM_PROVIDER", os.getenv("LLM_PROVIDER", "openai"))
+_llm_provider_default = os.getenv("LLM_PROVIDER", "openai")
+DEFAULT_LLM_PROVIDER = os.getenv("DEFAULT_LLM_PROVIDER", _llm_provider_default)
 DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "gpt-4o-mini")
 DEFAULT_LLM_TEMPERATURE = float(os.getenv("DEFAULT_LLM_TEMPERATURE", "0.7"))
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
@@ -13,7 +14,8 @@ DEFAULT_STT_PROVIDER = os.getenv("DEFAULT_STT_PROVIDER", "deepgram")
 DEFAULT_STT_MODEL = os.getenv("DEFAULT_STT_MODEL", "nova-3")
 DEFAULT_STT_LANGUAGE = os.getenv("DEFAULT_STT_LANGUAGE", "en-US")
 
-DEFAULT_TTS_PROVIDER = os.getenv("DEFAULT_TTS_PROVIDER", os.getenv("TTS_PROVIDER", "openai"))
+_tts_provider_default = os.getenv("TTS_PROVIDER", "openai")
+DEFAULT_TTS_PROVIDER = os.getenv("DEFAULT_TTS_PROVIDER", _tts_provider_default)
 OPENAI_TTS_MODEL = os.getenv("OPENAI_TTS_MODEL", "tts-1")
 OPENAI_TTS_VOICE = os.getenv("OPENAI_TTS_VOICE", "alloy")
 DEEPGRAM_TTS_MODEL = os.getenv("DEEPGRAM_TTS_MODEL", "aura-asteria-en")
