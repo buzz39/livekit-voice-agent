@@ -11,7 +11,7 @@ from livekit.agents import (
     cli,
     get_job_context,
 )
-from livekit.plugins import deepgram, openai, silero, inworld
+from livekit.plugins import silero
 import groq # Import Groq library
 from livekit import api
 from livekit import rtc
@@ -26,6 +26,7 @@ from outbound.sip import dial_participant
 from outbound.tools import create_tools
 from outbound.recording import start_recording
 from outbound.lifecycle import finalize_call as finalize_call_logic
+from outbound.providers import build_llm, build_stt, build_tts
 
 # Whispey Observability Integration
 try:
@@ -53,6 +54,7 @@ async def entrypoint(ctx: JobContext):
     # 2. Extract outbound metadata (robust)
     initial_metadata = extract_metadata(ctx)
     phone_number, business_name, agent_slug = get_required_fields(initial_metadata)
+    call_metadata["business_name"] = business_name
 
     logger.info(f"Parsed metadata → phone: {phone_number}, business: {business_name}, slug: {agent_slug}")
 
@@ -174,30 +176,9 @@ async def entrypoint(ctx: JobContext):
 
     agent = Agent(instructions=agent_instructions, tools=all_tools)
 
-    # Configure LLM based on database config and environment variable override
-    llm_provider_env = os.environ.get("LLM_PROVIDER", "").lower()
-    
-    if llm_provider_env == "groq":
-        logger.info(f"Using Groq LLM based on LLM_PROVIDER environment variable in outbound_agent")
-        groq_model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
-        # Using OpenAI LLM class but pointing to Groq's API endpoint
-        llm = openai.LLM(model=groq_model, temperature=float(ai_config.get("llm_temperature", 0.7)), base_url=os.environ.get("GROQ_API_URL", "https://api.groq.com/openai/v1"), api_key=os.environ.get("GROQ_API_KEY"))
-    elif llm_provider_env == "openai" or ai_config.get("llm_provider") == "openai":
-        logger.info(f"Using OpenAI LLM in outbound_agent")
-        llm = openai.LLM(model=ai_config.get("llm_model", "gpt-4o-mini"))
-    else:
-        logger.warning(f"Unsupported LLM provider: {ai_config.get('llm_provider')} or {llm_provider_env}, using OpenAI as fallback in outbound_agent")
-        llm = openai.LLM(model="gpt-4o-mini")
-    stt = deepgram.STT(model=ai_config.get("stt_model", "nova-3"), language=ai_config.get("stt_language", "en-US"))
-
-    # Configure TTS based on provider
-    if ai_config["tts_provider"] == "openai":
-        tts = openai.TTS(model=ai_config.get("tts_model", "tts-1"), voice=ai_config.get("tts_voice", "alloy"))
-    elif ai_config["tts_provider"] == "inworld":
-        tts = inworld.TTS(voice=ai_config.get("tts_voice", "Sarah"))
-    else:
-        logger.warning(f"Unsupported TTS provider: {ai_config['tts_provider']}, using OpenAI")
-        tts = openai.TTS(model="tts-1", voice="alloy")
+    llm = build_llm(ai_config=ai_config, metadata_overrides=initial_metadata)
+    stt = build_stt(ai_config=ai_config, metadata_overrides=initial_metadata)
+    tts = build_tts(ai_config=ai_config, metadata_overrides=initial_metadata)
 
     # Tune VAD parameters to reduce self-interruption and false positives from noise/echo
     # min_speech_duration: 0.2s (up from default ~0.05-0.1) to ignore short clicks/pops
