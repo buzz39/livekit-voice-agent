@@ -4,6 +4,7 @@ import ConfigPanel from './ConfigPanel';
 import { saveAgentConfig } from '../../api';
 
 const AGENT_CONFIG_STORAGE_KEY = 'aisha-agent-config';
+const DEFAULT_AGENT_SLUG = 'default_roofing_agent';
 
 const normalizePhoneNumber = (value) => value.replace(/[^\d+]/g, '');
 
@@ -57,7 +58,7 @@ const ActiveCallPanel = ({ status, onStartCall, onEndCall }) => {
       await onStartCall(
         normalizedPhoneNumber,
         agentConfig?.company_name || '',
-        agentConfig?.agent_slug || 'default_roofing_agent'
+        agentConfig?.agent_slug || DEFAULT_AGENT_SLUG
       );
     } catch (error) {
       setCallError(error?.message || 'Unable to start the call right now.');
