@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import logging
 from typing import Optional
 from urllib.parse import urlparse
@@ -7,7 +8,7 @@ from contextlib import asynccontextmanager
 import boto3
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from livekit import api
 from livekit.protocol.sip import CreateSIPParticipantRequest
 from livekit.protocol.room import CreateRoomRequest
@@ -58,12 +59,25 @@ app.add_middleware(
 ROOM_NAME_PREFIX = "outbound-call-"
 SIP_TRUNK_ID = os.getenv("SIP_TRUNK_ID", "ST_nVvG7n8BpJd3") # Default from existing code
 SIP_FROM_NUMBER = os.getenv("SIP_FROM_NUMBER", "+12029787305") # Default from existing code
+API_BASE_URL = os.getenv("API_BASE_URL", "").rstrip("/")  # e.g. https://livekit-outbound-api.tinysaas.fun
+
+# E.164 pattern: + followed by 1-15 digits
+_E164_RE = re.compile(r"^\+[1-9]\d{1,14}$")
 
 class OutboundCallRequest(BaseModel):
     phone_number: str
     business_name: str
     agent_slug: str = "roofing_agent"
     provider: Optional[str] = None # 'twilio' or 'telnyx' or default/sip
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone_number(cls, v: str) -> str:
+        if not _E164_RE.match(v):
+            raise ValueError(
+                "phone_number must be in E.164 format (e.g. +14155552671)"
+            )
+        return v
 
 class PromptUpdateRequest(BaseModel):
     name: str = "roofing_agent"
@@ -333,7 +347,7 @@ async def get_dashboard_calls(limit: int = 10):
         for call in calls:
             if call.get("recording_url"):
                 # Use the audio proxy endpoint
-                call["recording_url"] = f"https://livekit-outbound-api.tinysaas.fun/dashboard/audio/{call['id']}"
+                call["recording_url"] = f"{API_BASE_URL}/dashboard/audio/{call['id']}" if API_BASE_URL else f"/dashboard/audio/{call['id']}"
         return calls
     except Exception as e:
         logger.error(f"Error fetching calls: {e}")
@@ -351,7 +365,7 @@ async def get_call_details(call_id: int):
              raise HTTPException(status_code=404, detail="Call not found")
 
         if call.get("recording_url"):
-            call["recording_url"] = f"https://livekit-outbound-api.tinysaas.fun/dashboard/audio/{call['id']}"
+            call["recording_url"] = f"{API_BASE_URL}/dashboard/audio/{call['id']}" if API_BASE_URL else f"/dashboard/audio/{call['id']}"
 
         return call
     except HTTPException:
@@ -423,7 +437,19 @@ async def get_appointments():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok"}
+    health = {"status": "ok", "database": "unknown"}
+    if db_instance and db_instance.pool:
+        try:
+            async with db_instance.pool.acquire() as conn:
+                await conn.fetchval("SELECT 1")
+            health["database"] = "connected"
+        except Exception:
+            health["database"] = "disconnected"
+            health["status"] = "degraded"
+    else:
+        health["database"] = "not_configured"
+        health["status"] = "degraded"
+    return health
 
 if __name__ == "__main__":
     import uvicorn
