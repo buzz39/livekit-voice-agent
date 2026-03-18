@@ -100,7 +100,8 @@ class PlaygroundAgent:
                 dispatcher=dispatcher,
                 contact_id=self.contact_id,
                 phone_number=self.phone_number,
-                hangup_callback=hangup_callback
+                hangup_callback=hangup_callback,
+                ctx=self.ctx,
             )
 
             # AI Config

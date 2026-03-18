@@ -40,6 +40,8 @@ Copy `.env.example` to `.env` — it already contains the Vobiz + LiveKit creden
 - 🖥️ **Configurable UI** — Manage LLM and TTS providers directly from the React dashboard.
 - 📞 **Dual Voice Agents** — Separate inbound and outbound call handling
 - 📡 **SIP Telephony Integration** — Connect to real phone networks
+- 🔀 **Live Call Transfers** — Hand active SIP calls off to a human or another destination
+- 🧩 **Provider Builders** — Reusable outbound LLM/STT/TTS selection with env + metadata overrides
 - 🗄️ **Database-Driven Config** — Agent behavior configured via Neon PostgreSQL, no redeployment needed
 - 🔗 **MCP Integration** — Extend agents with n8n workflows via Model Context Protocol
 - 🔧 **Extensible Function Tools** — Plug in custom capabilities per agent
@@ -113,6 +115,9 @@ docker run --env-file .env voice-agent
 # Or run directly
 pip install -r requirements.txt
 python main.py
+
+# Dispatch an outbound call directly
+python make_call.py --to +14155552671 --business-name "Acme Roofing" --agent-slug default_roofing_agent
 ```
 
 ### Environment Variables

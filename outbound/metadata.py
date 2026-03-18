@@ -1,47 +1,63 @@
 import json
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 logger = logging.getLogger("outbound.metadata")
+
+def _parse_metadata(raw_metadata: Any) -> Dict[str, Any]:
+    """
+    Parse JSON metadata from bytes or strings, unwrap nested ``metadata`` payloads, and return a dict.
+
+    When both outer and nested metadata contain the same key, the nested value wins.
+    Invalid or non-dict payloads are treated as empty metadata, and nested parse failures are logged at debug level.
+    """
+    if not raw_metadata:
+        return {}
+
+    meta = raw_metadata
+    if isinstance(meta, (bytes, bytearray)):
+        meta = meta.decode("utf-8")
+
+    parsed = json.loads(meta)
+    if not isinstance(parsed, dict):
+        return {}
+
+    nested = parsed.get("metadata")
+    if nested:
+        try:
+            if isinstance(nested, (bytes, bytearray)):
+                nested = nested.decode("utf-8")
+            nested_metadata = json.loads(nested)
+            if isinstance(nested_metadata, dict):
+                parsed = {**parsed, **nested_metadata}
+                parsed.pop("metadata", None)
+        except Exception as e:
+            logger.debug(f"[metadata] Failed to parse nested metadata: {e}")
+
+    return parsed
+
 
 def extract_metadata(ctx: Any) -> Dict[str, Any]:
     """
     Extracts and normalizes metadata from ctx.job.metadata or ctx.room.metadata.
     """
-    initial_metadata = {}
+    initial_metadata: Dict[str, Any] = {}
 
-    # --- 1. Try ctx.job.metadata ---
     if getattr(ctx, "job", None) and getattr(ctx.job, "metadata", None):
         try:
-            meta = ctx.job.metadata
-            if isinstance(meta, (bytes, bytearray)):
-                meta = meta.decode("utf-8")
-            initial_metadata = json.loads(meta)
-            logger.info(f"[metadata] Loaded from ctx.job.metadata: {initial_metadata}")
+            job_metadata = _parse_metadata(ctx.job.metadata)
+            initial_metadata.update(job_metadata)
+            logger.info(f"[metadata] Loaded from ctx.job.metadata: {job_metadata}")
         except Exception as e:
             logger.warning(f"[metadata] Failed to parse ctx.job.metadata: {e}")
 
-    # --- 2. If empty, try ctx.room.metadata ---
-    if not initial_metadata and getattr(ctx, "room", None) and getattr(ctx.room, "metadata", None):
+    if getattr(ctx, "room", None) and getattr(ctx.room, "metadata", None):
         try:
-            meta = ctx.room.metadata
-            if isinstance(meta, (bytes, bytearray)):
-                meta = meta.decode("utf-8")
-            initial_metadata = json.loads(meta)
-            logger.info(f"[metadata] Loaded from ctx.room.metadata: {initial_metadata}")
+            room_metadata = _parse_metadata(ctx.room.metadata)
+            initial_metadata.update(room_metadata)
+            logger.info(f"[metadata] Loaded from ctx.room.metadata: {room_metadata}")
         except Exception as e:
             logger.warning(f"[metadata] Failed to parse ctx.room.metadata: {e}")
-
-    # --- 3. Normalize nested metadata: sometimes stored as {"metadata": "{...json...}"} ---
-    if isinstance(initial_metadata, dict) and "metadata" in initial_metadata:
-        try:
-            nested = initial_metadata["metadata"]
-            if isinstance(nested, (bytes, bytearray)):
-                nested = nested.decode("utf-8")
-            initial_metadata = json.loads(nested)
-            logger.info(f"[metadata] Loaded nested metadata: {initial_metadata}")
-        except Exception:
-            pass
 
     return initial_metadata
 
