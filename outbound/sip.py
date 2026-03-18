@@ -5,6 +5,8 @@ import logging
 from livekit.protocol.sip import CreateSIPParticipantRequest
 from typing import Optional
 
+from livekit.agents.utils.participant import wait_for_participant
+
 logger = logging.getLogger("outbound.sip")
 
 async def dial_participant(ctx, phone_number: str, business_name: str, dispatcher=None) -> bool:
@@ -50,6 +52,7 @@ async def dial_participant(ctx, phone_number: str, business_name: str, dispatche
         final_identity = re.sub(r"\D", "", phone_number)
 
     logger.info(f"Dialing {actual_sip_target} (identity={final_identity})...")
+    dial_error: Exception | None = None
     try:
         await ctx.api.sip.create_sip_participant(
             CreateSIPParticipantRequest(
@@ -62,16 +65,32 @@ async def dial_participant(ctx, phone_number: str, business_name: str, dispatche
                 wait_until_answered=True,
             )
         )
-        logger.info("Call answered!")
-        return True
+        logger.info("Call answered or dialing request accepted")
     except Exception as e:
+        dial_error = e
         logger.error(f"Failed to dial: {e}")
-        # Add a small delay to allow potential extensive cleanup or event processing
-        # to settle before ensuring the agent doesn't crash on race conditions
-        await asyncio.sleep(1)
+
+    try:
+        participant = await asyncio.wait_for(
+            wait_for_participant(ctx.room, identity=final_identity),
+            timeout=30.0,
+        )
+        logger.info("SIP participant connected: %s", participant.identity)
+        if dial_error and dispatcher:
+            try:
+                await dispatcher.dispatch(
+                    "call.dial_recovered",
+                    {"error": str(dial_error), "participant_identity": participant.identity},
+                )
+            except Exception:
+                pass
+        return True
+    except asyncio.TimeoutError:
+        logger.error("SIP participant never joined after dial attempt (identity=%s)", final_identity)
         if dispatcher:
             try:
-                await dispatcher.dispatch("call.failed", {"error": str(e)})
+                payload = {"error": str(dial_error) if dial_error else "participant join timeout"}
+                await dispatcher.dispatch("call.failed", payload)
             except Exception:
                 pass
         return False
