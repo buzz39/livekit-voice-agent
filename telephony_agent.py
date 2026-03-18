@@ -492,13 +492,19 @@ async def entrypoint(ctx: JobContext):
     if tts_provider_env == "sarvam" or ai_config["tts_provider"] == "sarvam":
         async def sarvam_generate_speech(text: str) -> bytes:
             return await sarvam_tts(text)
-        session._generate_speech = sarvam_generate_speech
-        logger.info("Overridden session._generate_speech for Sarvam TTS")
+        if hasattr(session, "_generate_speech"):
+            session._generate_speech = sarvam_generate_speech
+            logger.info("Overridden session._generate_speech for Sarvam TTS")
+        else:
+            logger.error("AgentSession has no '_generate_speech' — Sarvam TTS override skipped")
     elif tts_provider_env == "deepgram" or ai_config["tts_provider"] == "deepgram":
         async def deepgram_generate_speech(text: str) -> bytes:
             return await deepgram_tts(text, voice_id=ai_config.get("tts_voice", DEEPGRAM_TTS_VOICE))
-        session._generate_speech = deepgram_generate_speech
-        logger.info("Overridden session._generate_speech for Deepgram TTS")
+        if hasattr(session, "_generate_speech"):
+            session._generate_speech = deepgram_generate_speech
+            logger.info("Overridden session._generate_speech for Deepgram TTS")
+        else:
+            logger.error("AgentSession has no '_generate_speech' — Deepgram TTS override skipped")
 
     # Track if call was ended by agent
     call_ended_by_agent = False

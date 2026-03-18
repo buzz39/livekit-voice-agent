@@ -19,7 +19,7 @@ _REQUIRED_ENV_VARS = {
     "deepgram": ("DEEPGRAM_API_KEY",),
     "cartesia": ("CARTESIA_API_KEY",),
     "inworld": ("INWORLD_API_KEY",),
-    "sarvam": ("SARVAM_API_KEY",),
+    "sarvam": ("SARVAM_API_KEY", "OPENAI_API_KEY"),  # OpenAI needed for placeholder TTS at session init
 }
 
 

@@ -273,8 +273,16 @@ async def _run_entrypoint(ctx: JobContext):
         # LiveKit's current AgentSession API still requires a TTS object at construction
         # time, so Sarvam hooks in through the same private generator override already
         # used by the legacy telephony agent in this repository.
-        session._generate_speech = custom_tts_generator
-        logger.info("Overrode session speech generation for %s TTS", resolved_ai_config["tts_provider"])
+        if hasattr(session, "_generate_speech"):
+            session._generate_speech = custom_tts_generator
+            logger.info("Overrode session speech generation for %s TTS", resolved_ai_config["tts_provider"])
+        else:
+            logger.error(
+                "AgentSession has no '_generate_speech' attribute — custom %s TTS cannot be applied. "
+                "The session will fall back to the placeholder OpenAI TTS. "
+                "Upgrade or patch the Sarvam integration to match the current livekit-agents SDK.",
+                resolved_ai_config["tts_provider"],
+            )
 
     # Start Whispey session tracking with metadata
     session_id = None
