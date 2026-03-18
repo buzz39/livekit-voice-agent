@@ -14,7 +14,6 @@ dependencies = [
     "uvicorn>=0.27.0",
     "whispey>=0.1.0",
     "boto3>=1.42.8",
-    "aiosqlite>=0.22.0",
     "livekit-plugins-inworld>=1.2.18",
     "groq",
 ]

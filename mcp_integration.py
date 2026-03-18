@@ -15,6 +15,7 @@ Author: Gagan Thakur/Sambhav Tech
 
 import logging
 import os
+import re
 from typing import Any, Callable, Dict, List, Optional
 from mcp import ClientSession
 from mcp.client.sse import sse_client
@@ -119,80 +120,74 @@ class MCPToolsIntegration:
             logger.error(f"Failed to call tool {tool_name}: {e}")
             return f"Error calling tool: {str(e)}"
     
+    # Regex for validating tool/parameter names: only alphanumeric and underscores
+    _SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+    # Map JSON schema types to Python types
+    _TYPE_MAP: Dict[str, type] = {
+        "string": str,
+        "number": float,
+        "integer": int,
+        "boolean": bool,
+        "array": list,
+        "object": dict,
+    }
+
+    def _validate_identifier(self, name: str) -> str:
+        """Validate that a name is a safe Python identifier.
+
+        Raises ValueError if the name contains characters that could
+        enable code injection.
+        """
+        if not self._SAFE_IDENTIFIER_RE.match(name):
+            raise ValueError(f"Unsafe identifier rejected: {name!r}")
+        return name
+
     def create_livekit_tool(self, tool_def: Dict[str, Any]) -> Callable:
         """Create a LiveKit function tool from an MCP tool definition.
-        
+
+        Uses a closure-based factory instead of ``exec()`` to avoid
+        code-injection risks from untrusted tool/parameter names.
+
         Args:
             tool_def: MCP tool definition
-            
+
         Returns:
             LiveKit function tool
         """
-        tool_name = tool_def["name"]
+        tool_name = self._validate_identifier(tool_def["name"])
         tool_description = tool_def.get("description", "")
         input_schema = tool_def.get("inputSchema", {})
-        
-        # Extract properties from the input schema
+
+        # Extract and validate properties from the input schema
         properties = input_schema.get("properties", {})
-        required_params = input_schema.get("required", [])
-        
-        # Build parameter annotations and code dynamically
-        param_defs = []
-        annotations = {}
-        
+        param_names: List[str] = []
+
+        annotations: Dict[str, type] = {}
         for param_name, param_def in properties.items():
+            param_name = self._validate_identifier(param_name)
             param_type = param_def.get("type", "string")
-            
-            # Map JSON schema types to Python types
-            if param_type == "string":
-                py_type = str
-            elif param_type == "number":
-                py_type = float
-            elif param_type == "integer":
-                py_type = int
-            elif param_type == "boolean":
-                py_type = bool
-            elif param_type == "array":
-                py_type = list
-            elif param_type == "object":
-                py_type = dict
-            else:
-                py_type = str  # Default to string
-            
+            py_type = self._TYPE_MAP.get(param_type, str)
             annotations[param_name] = py_type
-            
-            # Add default value for optional parameters
-            if param_name not in required_params:
-                param_defs.append(f"{param_name}: {py_type.__name__} = None")
-            else:
-                param_defs.append(f"{param_name}: {py_type.__name__}")
-        
-        # Build the function code dynamically
-        params_str = ", ".join(param_defs) if param_defs else ""
-        
-        # Create the function using exec (necessary for dynamic parameters)
-        func_code = f"""
-async def {tool_name}({params_str}) -> str:
-    '''
-    {tool_description}
-    '''
-    # Collect all arguments
-    args = {{}}
-    {chr(10).join([f"    if {p.split(':')[0].strip()} is not None: args['{p.split(':')[0].strip()}'] = {p.split(':')[0].strip()}" for p in param_defs])}
-    return await _call_tool_impl('{tool_name}', args)
-"""
-        
-        # Create a namespace with the call_tool implementation
-        namespace = {
-            "_call_tool_impl": self.call_tool
-        }
-        
-        # Execute the function definition
-        exec(func_code, namespace)
-        mcp_tool_wrapper = namespace[tool_name]
-        
+            param_names.append(param_name)
+
+        # Capture references for the closure
+        call_impl = self.call_tool
+        captured_tool_name = tool_name
+        captured_param_names = list(param_names)
+
+        async def _mcp_tool_wrapper(**kwargs: Any) -> str:
+            args = {k: v for k, v in kwargs.items() if k in captured_param_names and v is not None}
+            return await call_impl(captured_tool_name, args)
+
+        # Set metadata so LiveKit/LLM can discover the function correctly
+        _mcp_tool_wrapper.__name__ = tool_name
+        _mcp_tool_wrapper.__qualname__ = tool_name
+        _mcp_tool_wrapper.__doc__ = tool_description
+        _mcp_tool_wrapper.__annotations__ = {**annotations, "return": str}
+
         # Decorate with function_tool
-        return function_tool(mcp_tool_wrapper)
+        return function_tool(_mcp_tool_wrapper)
     
     async def get_livekit_tools(self) -> List[Callable]:
         """Get all MCP tools as LiveKit function tools.
