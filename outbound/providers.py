@@ -11,6 +11,7 @@ from outbound.sarvam_tts import (
     SARVAM_DEFAULT_VOICE,
     VALID_SARVAM_SPEAKERS,
     SarvamTTS,
+    normalize_sarvam_language,
     normalize_sarvam_model,
     normalize_sarvam_speaker,
 )
@@ -125,6 +126,7 @@ def resolve_ai_configuration(ai_config: Dict[str, Any], metadata_overrides: Opti
     elif tts_provider == "sarvam":
         tts_model = tts_model or SARVAM_PLACEHOLDER_MODEL
         tts_voice = tts_voice or SARVAM_TTS_VOICE
+        tts_language = normalize_sarvam_language(tts_language)
         if not tts_model or str(tts_model).strip().lower() in {"sarvam", "tts-1", "bulbul:v1"}:
             tts_model = SARVAM_PLACEHOLDER_MODEL
         else:

@@ -23,6 +23,47 @@ SARVAM_DEFAULT_MODEL = os.getenv("SARVAM_MODEL", "bulbul:v3")
 SARVAM_SAMPLE_RATE = 22050
 SARVAM_NUM_CHANNELS = 1
 VALID_MODELS = {"bulbul:v2", "bulbul:v3-beta", "bulbul:v3"}
+VALID_SARVAM_LANGUAGES = {
+    "bn-IN",
+    "en-IN",
+    "gu-IN",
+    "hi-IN",
+    "kn-IN",
+    "ml-IN",
+    "mr-IN",
+    "od-IN",
+    "pa-IN",
+    "ta-IN",
+    "te-IN",
+}
+SARVAM_LANGUAGE_ALIASES = {
+    "bn": "bn-IN",
+    "bengali": "bn-IN",
+    "en": "en-IN",
+    "en-gb": "en-IN",
+    "en-us": "en-IN",
+    "english": "en-IN",
+    "gu": "gu-IN",
+    "gujarati": "gu-IN",
+    "hi": "hi-IN",
+    "hindi": "hi-IN",
+    "hinglish": "en-IN",
+    "kn": "kn-IN",
+    "kannada": "kn-IN",
+    "ml": "ml-IN",
+    "malayalam": "ml-IN",
+    "mr": "mr-IN",
+    "marathi": "mr-IN",
+    "od": "od-IN",
+    "odia": "od-IN",
+    "oriya": "od-IN",
+    "pa": "pa-IN",
+    "punjabi": "pa-IN",
+    "ta": "ta-IN",
+    "tamil": "ta-IN",
+    "te": "te-IN",
+    "telugu": "te-IN",
+}
 VALID_SARVAM_SPEAKERS = {
     "aditya",
     "anand",
@@ -82,6 +123,23 @@ def normalize_sarvam_model(model: Optional[str]) -> str:
     return SARVAM_DEFAULT_MODEL
 
 
+def normalize_sarvam_language(language: Optional[str]) -> str:
+    if language:
+        candidate = language.strip()
+        if candidate in VALID_SARVAM_LANGUAGES:
+            return candidate
+
+        normalized = candidate.lower()
+        if normalized in SARVAM_LANGUAGE_ALIASES:
+            return SARVAM_LANGUAGE_ALIASES[normalized]
+
+        title_cased = normalized.split("-")[0] + "-IN" if "-" not in normalized else normalized.split("-")[0] + "-IN"
+        if title_cased in VALID_SARVAM_LANGUAGES:
+            return title_cased
+
+    return SARVAM_DEFAULT_LANGUAGE
+
+
 class SarvamTTS(TTS):
     """LiveKit-compatible TTS backed by the Sarvam AI REST API."""
 
@@ -103,7 +161,7 @@ class SarvamTTS(TTS):
             num_channels=num_channels,
         )
         self._voice = normalize_sarvam_speaker(voice or SARVAM_DEFAULT_VOICE)
-        self._language = language or SARVAM_DEFAULT_LANGUAGE
+        self._language = normalize_sarvam_language(language or SARVAM_DEFAULT_LANGUAGE)
         self._model = normalize_sarvam_model(model or SARVAM_DEFAULT_MODEL)
         self._pace = pace
         self._api_key = api_key or os.getenv("SARVAM_API_KEY", "")
@@ -179,14 +237,17 @@ class _SarvamChunkedStream(ChunkedStream):
 
         speaker = normalize_sarvam_speaker(self._voice)
         model = normalize_sarvam_model(self._model)
+        language = normalize_sarvam_language(self._language)
         if speaker != self._voice:
             logger.warning("Unsupported Sarvam speaker '%s' - falling back to '%s'", self._voice, speaker)
         if model != self._model:
             logger.warning("Unsupported Sarvam model '%s' - falling back to '%s'", self._model, model)
+        if language != self._language:
+            logger.warning("Unsupported Sarvam language '%s' - falling back to '%s'", self._language, language)
 
         payload = {
             "text": self._input_text,
-            "target_language_code": self._language,
+            "target_language_code": language,
             "speaker": speaker,
             "model": model,
             "speech_sample_rate": self._tts.sample_rate,
@@ -206,8 +267,11 @@ class _SarvamChunkedStream(ChunkedStream):
             )
             if response.status_code != 200:
                 logger.error(
-                    "Sarvam TTS request failed with status %s: %s",
+                    "Sarvam TTS request failed with status %s for model=%s speaker=%s language=%s: %s",
                     response.status_code,
+                    model,
+                    speaker,
+                    language,
                     response.text,
                 )
                 response.raise_for_status()
