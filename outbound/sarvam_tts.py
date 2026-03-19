@@ -1,10 +1,13 @@
-"""Sarvam TTS plugin for LiveKit Agents using Bulbul v3 HTTP streaming."""
+"""Sarvam TTS plugin for LiveKit Agents using Bulbul v3 REST synthesis."""
 
 from __future__ import annotations
 
+import base64
+import io
 import logging
 import os
 import uuid
+import wave
 from typing import Optional
 
 import httpx
@@ -13,7 +16,7 @@ from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions
 
 logger = logging.getLogger("outbound.sarvam_tts")
 
-SARVAM_API_URL = os.getenv("SARVAM_API_URL", "https://api.sarvam.ai/text-to-speech/stream")
+SARVAM_API_URL = os.getenv("SARVAM_API_URL", "https://api.sarvam.ai/text-to-speech")
 SARVAM_DEFAULT_VOICE = os.getenv("SARVAM_VOICE_ID", "simran")
 SARVAM_DEFAULT_LANGUAGE = os.getenv("SARVAM_LANGUAGE", "en-IN")
 SARVAM_DEFAULT_MODEL = os.getenv("SARVAM_MODEL", "bulbul:v3")
@@ -80,7 +83,7 @@ def normalize_sarvam_model(model: Optional[str]) -> str:
 
 
 class SarvamTTS(TTS):
-    """LiveKit-compatible TTS backed by the Sarvam AI HTTP streaming API."""
+    """LiveKit-compatible TTS backed by the Sarvam AI REST API."""
 
     def __init__(
         self,
@@ -186,10 +189,8 @@ class _SarvamChunkedStream(ChunkedStream):
             "target_language_code": self._language,
             "speaker": speaker,
             "model": model,
-            "output_audio_codec": "linear16",
             "speech_sample_rate": self._tts.sample_rate,
             "pace": self._pace,
-            "enable_preprocessing": True,
         }
         headers = {
             "api-subscription-key": self._api_key,
@@ -197,22 +198,33 @@ class _SarvamChunkedStream(ChunkedStream):
         }
 
         async with httpx.AsyncClient() as client:
-            async with client.stream(
-                "POST",
+            response = await client.post(
                 self._api_url,
                 json=payload,
                 headers=headers,
                 timeout=self._conn_options.timeout,
-            ) as response:
-                if response.status_code != 200:
-                    body = await response.aread()
-                    logger.error(
-                        "Sarvam TTS request failed with status %s: %s",
-                        response.status_code,
-                        body.decode("utf-8", errors="replace"),
-                    )
-                    response.raise_for_status()
+            )
+            if response.status_code != 200:
+                logger.error(
+                    "Sarvam TTS request failed with status %s: %s",
+                    response.status_code,
+                    response.text,
+                )
+                response.raise_for_status()
 
-                async for chunk in response.aiter_bytes(chunk_size=4096):
-                    if chunk:
-                        output_emitter.push(chunk)
+            data = response.json()
+            audios = data.get("audios") or []
+            if not audios:
+                logger.error("Sarvam TTS response missing audio payload: %s", data)
+                raise ValueError("Sarvam TTS response did not include any audio data")
+
+            audio_bytes = base64.b64decode(audios[0])
+            output_emitter.push(_extract_pcm(audio_bytes))
+
+
+def _extract_pcm(audio_bytes: bytes) -> bytes:
+    if not audio_bytes.startswith(b"RIFF"):
+        return audio_bytes
+
+    with wave.open(io.BytesIO(audio_bytes), "rb") as wav_file:
+        return wav_file.readframes(wav_file.getnframes())

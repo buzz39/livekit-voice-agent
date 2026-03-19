@@ -67,14 +67,18 @@ async def deepgram_tts(text: str, voice_id: str = DEEPGRAM_TTS_VOICE) -> bytes:
 from livekit import api
 from mcp_integration import load_mcp_tools
 import os
+import base64
+import io
 import httpx
+import wave
 from neon_db import get_db
 
 load_dotenv()
 logger = logging.getLogger("telephony-agent")
 
-SARVAM_API_URL = os.environ.get("SARVAM_API_URL", "https://api.sarvam.ai/v1/tts")
-SARVAM_VOICE_ID = os.environ.get("SARVAM_VOICE_ID", "saarika:v2.5") # Example: saarika:v2.5 (Hindi female)
+SARVAM_API_URL = os.environ.get("SARVAM_API_URL", "https://api.sarvam.ai/text-to-speech")
+SARVAM_VOICE_ID = os.environ.get("SARVAM_VOICE_ID", "simran")
+SARVAM_MODEL = os.environ.get("SARVAM_MODEL", "bulbul:v3")
 
 async def sarvam_tts(text: str, voice_id: str = SARVAM_VOICE_ID) -> bytes:
     sarvam_api_key = os.environ.get("SARVAM_API_KEY")
@@ -83,21 +87,35 @@ async def sarvam_tts(text: str, voice_id: str = SARVAM_VOICE_ID) -> bytes:
         raise ValueError("Sarvam AI API key not found.")
     
     headers = {
-        "Authorization": f"Bearer {sarvam_api_key}",
+        "api-subscription-key": sarvam_api_key,
         "Content-Type": "application/json"
     }
     payload = {
         "text": text,
-        "voice": voice_id,
-        "response_format": "pcm", # LiveKit expects raw audio
-        "sample_rate": 16000 # LiveKit expects 16kHz
+        "target_language_code": "en-IN",
+        "speaker": voice_id,
+        "model": SARVAM_MODEL,
+        "speech_sample_rate": 22050,
+        "pace": 1.0,
     }
     
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(SARVAM_API_URL, json=payload, headers=headers, timeout=10.0)
-            response.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
-            return response.content
+            if response.status_code != 200:
+                logger.error(f"Sarvam TTS HTTP error for {response.request.url}: {response.status_code} - {response.text}")
+                response.raise_for_status()
+
+            data = response.json()
+            audios = data.get("audios") or []
+            if not audios:
+                raise ValueError(f"Sarvam TTS response missing audio payload: {data}")
+
+            audio_bytes = base64.b64decode(audios[0])
+            if audio_bytes.startswith(b"RIFF"):
+                with wave.open(io.BytesIO(audio_bytes), "rb") as wav_file:
+                    return wav_file.readframes(wav_file.getnframes())
+            return audio_bytes
         except httpx.RequestError as exc:
             logger.error(f"An error occurred while requesting Sarvam TTS: {exc}")
             raise
