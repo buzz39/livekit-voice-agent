@@ -317,6 +317,24 @@ async def _run_entrypoint(ctx: JobContext):
     # This function handles the dialing and basic error reporting
     dial_success = await dial_participant(ctx, phone_number, business_name, dispatcher)
     if not dial_success:
+        logger.warning("SIP dial failed for %s — marking call %s as failed", phone_number, call_metadata.get("call_id"))
+        call_id = call_metadata.get("call_id")
+        if call_id and db:
+            try:
+                await db.update_call(
+                    call_id=call_id,
+                    call_status="failed",
+                    notes="SIP dial failed — carrier returned error",
+                    captured_data=call_metadata,
+                )
+            except Exception as e:
+                logger.error("Failed to update call %s as failed: %s", call_id, e)
+        # Cancel the pending session start task
+        session_start_task.cancel()
+        try:
+            await session_start_task
+        except (asyncio.CancelledError, Exception):
+            pass
         return
 
     # ===================== RECORDING =====================
