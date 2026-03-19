@@ -11,6 +11,7 @@ from livekit.agents import (
     cli,
     get_job_context,
 )
+from livekit.agents.voice.room_io import RoomInputOptions
 import groq # Import Groq library
 from livekit import api
 from livekit import rtc
@@ -283,7 +284,11 @@ async def _run_entrypoint(ctx: JobContext):
 
     async def start_agent_session():
         try:
-            await session.start(agent=agent, room=ctx.room)
+            await session.start(
+                agent=agent,
+                room=ctx.room,
+                room_input_options=RoomInputOptions(close_on_disconnect=False),
+            )
         except Exception as e:
             error_message = (
                 f"LiveKit agent session failed to start for room {ctx.room.name} "
