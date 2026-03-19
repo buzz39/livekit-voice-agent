@@ -9,6 +9,7 @@ import config as default_config
 from outbound.sarvam_tts import (
     SARVAM_DEFAULT_MODEL,
     SARVAM_DEFAULT_VOICE,
+    SARVAM_SAMPLE_RATE,
     VALID_SARVAM_SPEAKERS,
     SarvamTTS,
     normalize_sarvam_language,
@@ -229,7 +230,7 @@ def build_tts(ai_config: Dict[str, Any], metadata_overrides: Optional[Dict[str, 
 
     if provider == "sarvam":
         logger.info(f"Using Sarvam TTS: {model}/{voice}/{language}")
-        return SarvamTTS(voice=voice, model=model, language=language)
+        return SarvamTTS(voice=voice, model=model, language=language, sample_rate=SARVAM_SAMPLE_RATE)
 
     logger.info(f"Using OpenAI TTS: {model}/{voice}")
     return openai.TTS(model=model, voice=voice)

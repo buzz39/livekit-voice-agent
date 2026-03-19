@@ -1,4 +1,4 @@
-"""Sarvam TTS plugin for LiveKit Agents using Bulbul v3 REST synthesis."""
+"""Sarvam TTS plugin for LiveKit Agents using Bulbul v3 HTTP streaming synthesis."""
 
 from __future__ import annotations
 
@@ -17,10 +17,11 @@ from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions
 logger = logging.getLogger("outbound.sarvam_tts")
 
 SARVAM_API_URL = os.getenv("SARVAM_API_URL", "https://api.sarvam.ai/text-to-speech")
+SARVAM_STREAM_URL = os.getenv("SARVAM_STREAM_URL", "https://api.sarvam.ai/text-to-speech/stream")
 SARVAM_DEFAULT_VOICE = os.getenv("SARVAM_VOICE_ID", "simran")
 SARVAM_DEFAULT_LANGUAGE = os.getenv("SARVAM_LANGUAGE", "en-IN")
 SARVAM_DEFAULT_MODEL = os.getenv("SARVAM_MODEL", "bulbul:v3")
-SARVAM_SAMPLE_RATE = 22050
+SARVAM_SAMPLE_RATE = int(os.getenv("SARVAM_SAMPLE_RATE", "8000"))
 SARVAM_NUM_CHANNELS = 1
 VALID_MODELS = {"bulbul:v2", "bulbul:v3-beta", "bulbul:v3"}
 VALID_SARVAM_LANGUAGES = {
@@ -141,7 +142,7 @@ def normalize_sarvam_language(language: Optional[str]) -> str:
 
 
 class SarvamTTS(TTS):
-    """LiveKit-compatible TTS backed by the Sarvam AI REST API."""
+    """LiveKit-compatible TTS backed by the Sarvam AI HTTP streaming API."""
 
     def __init__(
         self,
@@ -165,7 +166,7 @@ class SarvamTTS(TTS):
         self._model = normalize_sarvam_model(model or SARVAM_DEFAULT_MODEL)
         self._pace = pace
         self._api_key = api_key or os.getenv("SARVAM_API_KEY", "")
-        self._api_url = api_url or SARVAM_API_URL
+        self._api_url = api_url or SARVAM_STREAM_URL
 
         if not self._api_key:
             raise ValueError("Sarvam API key not provided. Set SARVAM_API_KEY or pass api_key=")
@@ -201,7 +202,7 @@ class SarvamTTS(TTS):
 
 
 class _SarvamChunkedStream(ChunkedStream):
-    """Fetches audio from Sarvam REST API and pushes PCM frames."""
+    """Streams audio from Sarvam HTTP streaming API and pushes PCM frames."""
 
     def __init__(
         self,
@@ -259,31 +260,58 @@ class _SarvamChunkedStream(ChunkedStream):
         }
 
         async with httpx.AsyncClient() as client:
-            response = await client.post(
-                self._api_url,
-                json=payload,
-                headers=headers,
-                timeout=self._conn_options.timeout,
-            )
-            if response.status_code != 200:
-                logger.error(
-                    "Sarvam TTS request failed with status %s for model=%s speaker=%s language=%s: %s",
-                    response.status_code,
-                    model,
-                    speaker,
-                    language,
-                    response.text,
+            # Use the streaming endpoint for lower time-to-first-byte
+            if "/stream" in self._api_url:
+                payload["output_audio_codec"] = "pcm"
+                async with client.stream(
+                    "POST",
+                    self._api_url,
+                    json=payload,
+                    headers=headers,
+                    timeout=self._conn_options.timeout,
+                ) as response:
+                    if response.status_code != 200:
+                        body = await response.aread()
+                        logger.error(
+                            "Sarvam TTS stream failed with status %s for model=%s speaker=%s language=%s: %s",
+                            response.status_code,
+                            model,
+                            speaker,
+                            language,
+                            body.decode("utf-8", errors="replace"),
+                        )
+                        response.raise_for_status()
+
+                    async for chunk in response.aiter_bytes(chunk_size=4096):
+                        if chunk:
+                            output_emitter.push(chunk)
+            else:
+                # Fallback: REST endpoint returns base64-encoded WAV
+                response = await client.post(
+                    self._api_url,
+                    json=payload,
+                    headers=headers,
+                    timeout=self._conn_options.timeout,
                 )
-                response.raise_for_status()
+                if response.status_code != 200:
+                    logger.error(
+                        "Sarvam TTS request failed with status %s for model=%s speaker=%s language=%s: %s",
+                        response.status_code,
+                        model,
+                        speaker,
+                        language,
+                        response.text,
+                    )
+                    response.raise_for_status()
 
-            data = response.json()
-            audios = data.get("audios") or []
-            if not audios:
-                logger.error("Sarvam TTS response missing audio payload: %s", data)
-                raise ValueError("Sarvam TTS response did not include any audio data")
+                data = response.json()
+                audios = data.get("audios") or []
+                if not audios:
+                    logger.error("Sarvam TTS response missing audio payload: %s", data)
+                    raise ValueError("Sarvam TTS response did not include any audio data")
 
-            audio_bytes = base64.b64decode(audios[0])
-            output_emitter.push(_extract_pcm(audio_bytes))
+                audio_bytes = base64.b64decode(audios[0])
+                output_emitter.push(_extract_pcm(audio_bytes))
 
 
 def _extract_pcm(audio_bytes: bytes) -> bytes:

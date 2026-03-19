@@ -1,10 +1,14 @@
 import asyncio
+import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from outbound.sip import dial_participant
+
+# Ensure trunk ID is set so dial_participant doesn't early-return
+_SIP_ENV = {"LIVEKIT_OUTBOUND_TRUNK_ID": "trunk-test-123"}
 
 
 def _make_ctx():
@@ -24,7 +28,8 @@ async def test_dial_participant_recovers_when_participant_joins_after_exception(
     participant = SimpleNamespace(identity="15550000000")
     ctx.api.sip.create_sip_participant.side_effect = RuntimeError("sip status 500")
 
-    with patch("outbound.sip.wait_for_participant", new=AsyncMock(return_value=participant)):
+    with patch.dict(os.environ, _SIP_ENV), \
+         patch("outbound.sip.wait_for_participant", new=AsyncMock(return_value=participant)):
         success = await dial_participant(ctx, "+15550000000", "Test Biz", dispatcher)
 
     assert success is True
@@ -43,7 +48,8 @@ async def test_dial_participant_fails_when_participant_never_joins():
     async def _timeout(*args, **kwargs):
         raise asyncio.TimeoutError()
 
-    with patch("outbound.sip.wait_for_participant", new=AsyncMock(side_effect=_timeout)):
+    with patch.dict(os.environ, _SIP_ENV), \
+         patch("outbound.sip.wait_for_participant", new=AsyncMock(side_effect=_timeout)):
         success = await dial_participant(ctx, "+15550000000", "Test Biz", dispatcher)
 
     assert success is False
@@ -56,7 +62,8 @@ async def test_dial_participant_waits_for_join_after_successful_dial():
     dispatcher = AsyncMock()
     participant = SimpleNamespace(identity="sip:agent@test.local")
 
-    with patch("outbound.sip.wait_for_participant", new=AsyncMock(return_value=participant)):
+    with patch.dict(os.environ, _SIP_ENV), \
+         patch("outbound.sip.wait_for_participant", new=AsyncMock(return_value=participant)):
         success = await dial_participant(ctx, "sip:agent@test.local", "Test Biz", dispatcher)
 
     assert success is True

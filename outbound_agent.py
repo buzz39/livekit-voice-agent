@@ -11,7 +11,6 @@ from livekit.agents import (
     cli,
     get_job_context,
 )
-from livekit.plugins import silero
 import groq # Import Groq library
 from livekit import api
 from livekit import rtc
@@ -252,19 +251,16 @@ async def _run_entrypoint(ctx: JobContext):
             logger.warning("call.failed webhook error during provider initialization: %s", dispatch_error)
         return
 
-    # Tune VAD parameters to reduce self-interruption and false positives from noise/echo
-    # min_speech_duration: 0.2s (up from default ~0.05-0.1) to ignore short clicks/pops
-    # activation_threshold: 0.6 (up from 0.5) to be less sensitive to background noise/echo
-    # min_silence_duration: 0.2s (can adjust as needed)
+    # Use STT-based turn detection instead of Silero VAD to avoid the
+    # 0.6–1s inference delay that was making the agent feel sluggish on
+    # the container's CPU budget.  Deepgram's endpointing handles
+    # silence/speech gating natively.
     session = AgentSession(
-        vad=silero.VAD.load(
-            min_speech_duration=0.2,
-            min_silence_duration=0.2,
-            activation_threshold=0.6,
-        ),
+        turn_detection="stt",
         stt=stt,
         llm=llm,
-        tts=tts
+        tts=tts,
+        min_endpointing_delay=0.07,
     )
 
 
