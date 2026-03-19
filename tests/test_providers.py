@@ -80,6 +80,7 @@ def test_resolve_ai_configuration_reports_effective_pipeline():
         "tts_provider": "cartesia",
         "tts_model": "sonic-2",
         "tts_voice": "room-voice",
+        "tts_language": "en-IN",
     }
 
 
@@ -117,8 +118,9 @@ def test_resolve_ai_configuration_preserves_sarvam_provider():
         resolved = resolve_ai_configuration(ai_config=ai_config)
 
     assert resolved["tts_provider"] == "sarvam"
-    assert resolved["tts_model"] == "bulbul:v1"
-    assert resolved["tts_voice"] == "anushka"
+    assert resolved["tts_model"] == "bulbul:v3"
+    assert resolved["tts_voice"] == "simran"
+    assert resolved["tts_language"] == "en-IN"
 
 
 def test_get_missing_provider_env_vars_includes_sarvam_key():
@@ -145,21 +147,24 @@ def test_get_missing_provider_env_vars_sarvam_falls_back_to_openai():
 
 
 def test_build_tts_returns_sarvam_tts_instance():
-    ai_config = {"tts_provider": "sarvam", "tts_voice": "anushka"}
+    ai_config = {"tts_provider": "sarvam", "tts_voice": "simran", "tts_language": "hi-IN"}
 
     with patch.dict("os.environ", {"SARVAM_API_KEY": "test-key", "OPENAI_API_KEY": "test-openai", "DEEPGRAM_API_KEY": "test-deepgram"}, clear=True):
         tts = build_tts(ai_config=ai_config)
 
     from outbound.sarvam_tts import SarvamTTS
     assert isinstance(tts, SarvamTTS)
+    assert tts._voice == "simran"
+    assert tts._language == "hi-IN"
+    assert tts._model == "bulbul:v3"
 
 
 def test_resolve_ai_configuration_normalizes_legacy_sarvam_values():
-    ai_config = {"tts_provider": "sarvam", "tts_voice": "Sarah", "tts_model": "sarvam"}
+    ai_config = {"tts_provider": "sarvam", "tts_voice": "anushka", "tts_model": "tts-1"}
 
     with patch.dict("os.environ", {"SARVAM_API_KEY": "test-key", "OPENAI_API_KEY": "test-openai", "DEEPGRAM_API_KEY": "test-deepgram"}, clear=True):
         resolved = resolve_ai_configuration(ai_config=ai_config)
 
     assert resolved["tts_provider"] == "sarvam"
-    assert resolved["tts_voice"] == "anushka"
-    assert resolved["tts_model"] == "bulbul:v1"
+    assert resolved["tts_voice"] == "simran"
+    assert resolved["tts_model"] == "bulbul:v3"

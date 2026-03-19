@@ -11,12 +11,15 @@ from outbound.sarvam_tts import (
     SARVAM_DEFAULT_VOICE,
     VALID_SARVAM_SPEAKERS,
     SarvamTTS,
+    normalize_sarvam_model,
+    normalize_sarvam_speaker,
 )
 
 logger = logging.getLogger("outbound.providers")
 
 SARVAM_TTS_VOICE = os.getenv("SARVAM_VOICE_ID", SARVAM_DEFAULT_VOICE)
 SARVAM_PLACEHOLDER_MODEL = SARVAM_DEFAULT_MODEL
+SARVAM_DEFAULT_LANGUAGE = os.getenv("SARVAM_LANGUAGE", "en-IN")
 
 _REQUIRED_ENV_VARS = {
     "openai": ("OPENAI_API_KEY",),
@@ -106,6 +109,11 @@ def resolve_ai_configuration(ai_config: Dict[str, Any], metadata_overrides: Opti
 
     tts_voice = _override(metadata_overrides, "voice_id", "tts_voice") or ai_config.get("tts_voice")
     tts_model = _override(metadata_overrides, "tts_model") or ai_config.get("tts_model")
+    tts_language = (
+        _override(metadata_overrides, "tts_language", "language")
+        or ai_config.get("tts_language")
+        or SARVAM_DEFAULT_LANGUAGE
+    )
 
     if tts_provider == "cartesia":
         tts_model = tts_model or default_config.CARTESIA_TTS_MODEL
@@ -117,10 +125,11 @@ def resolve_ai_configuration(ai_config: Dict[str, Any], metadata_overrides: Opti
     elif tts_provider == "sarvam":
         tts_model = tts_model or SARVAM_PLACEHOLDER_MODEL
         tts_voice = tts_voice or SARVAM_TTS_VOICE
-        if tts_model == "sarvam":
+        if not tts_model or str(tts_model).strip().lower() in {"sarvam", "tts-1", "bulbul:v1"}:
             tts_model = SARVAM_PLACEHOLDER_MODEL
-        if tts_voice not in VALID_SARVAM_SPEAKERS:
-            tts_voice = SARVAM_TTS_VOICE
+        else:
+            tts_model = normalize_sarvam_model(str(tts_model))
+        tts_voice = normalize_sarvam_speaker(str(tts_voice))
     else:
         tts_provider = "openai"
         tts_model = tts_model or default_config.OPENAI_TTS_MODEL
@@ -136,6 +145,7 @@ def resolve_ai_configuration(ai_config: Dict[str, Any], metadata_overrides: Opti
         "tts_provider": tts_provider,
         "tts_model": tts_model,
         "tts_voice": tts_voice,
+        "tts_language": tts_language,
     }
 
 
@@ -201,6 +211,7 @@ def build_tts(ai_config: Dict[str, Any], metadata_overrides: Optional[Dict[str, 
     provider = resolved["tts_provider"]
     voice = resolved["tts_voice"]
     model = resolved["tts_model"]
+    language = resolved.get("tts_language", SARVAM_DEFAULT_LANGUAGE)
 
     if provider == "cartesia":
         logger.info(f"Using Cartesia TTS: {model}/{voice}")
@@ -215,8 +226,8 @@ def build_tts(ai_config: Dict[str, Any], metadata_overrides: Optional[Dict[str, 
         return inworld.TTS(voice=voice)
 
     if provider == "sarvam":
-        logger.info(f"Using Sarvam TTS: {model}/{voice}")
-        return SarvamTTS(voice=voice, model=model)
+        logger.info(f"Using Sarvam TTS: {model}/{voice}/{language}")
+        return SarvamTTS(voice=voice, model=model, language=language)
 
     logger.info(f"Using OpenAI TTS: {model}/{voice}")
     return openai.TTS(model=model, voice=voice)

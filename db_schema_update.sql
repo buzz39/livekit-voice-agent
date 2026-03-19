@@ -75,11 +75,11 @@ WHERE llm_model = 'gpt-5-nano';
 
 -- Fix: replace legacy Sarvam values that cause 400 Bad Request responses
 UPDATE ai_configs
-SET tts_voice = 'anushka'
+SET tts_voice = 'simran'
 WHERE tts_provider = 'sarvam'
-    AND LOWER(COALESCE(tts_voice, '')) IN ('sarah', 'meera');
+    AND LOWER(COALESCE(tts_voice, '')) IN ('sarah', 'meera', 'anushka');
 
 UPDATE ai_configs
-SET tts_model = 'bulbul:v1'
+SET tts_model = 'bulbul:v3'
 WHERE tts_provider = 'sarvam'
-    AND COALESCE(tts_model, '') IN ('', 'sarvam');
+        AND COALESCE(tts_model, '') IN ('', 'sarvam', 'tts-1', 'bulbul:v1');
