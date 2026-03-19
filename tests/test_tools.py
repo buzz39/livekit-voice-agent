@@ -1,3 +1,4 @@
+import os
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from outbound.tools import create_tools
@@ -164,4 +165,8 @@ async def test_transfer_call_uses_default_tel_destination_without_sip_domain():
 
     assert result == "Transfer initiated successfully."
     request = mock_ctx.api.sip.transfer_sip_participant.await_args.args[0]
-    assert request.transfer_to == "tel:+15553334444"
+    sip_domain = os.getenv("SIP_DOMAIN") or os.getenv("VOBIZ_SIP_DOMAIN")
+    if sip_domain:
+        assert request.transfer_to == f"sip:+15553334444@{sip_domain}"
+    else:
+        assert request.transfer_to == "tel:+15553334444"

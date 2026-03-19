@@ -1,203 +1,107 @@
-import base64
-import io
-import json
-import wave
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+"""Tests for Sarvam TTS integration (official plugin + language normalization)."""
 
-import httpx
 import pytest
 
-from outbound.sarvam_tts import SarvamTTS, _extract_pcm, normalize_sarvam_language, SARVAM_STREAM_URL
+from outbound.sarvam_tts import (
+    SARVAM_DEFAULT_LANGUAGE,
+    SARVAM_DEFAULT_MODEL,
+    SARVAM_DEFAULT_VOICE,
+    SARVAM_SAMPLE_RATE,
+    normalize_sarvam_language,
+    normalize_sarvam_model,
+    normalize_sarvam_speaker,
+)
 
 
-class _FakeEmitter:
-    def __init__(self):
-        self.initialized = None
-        self.chunks = []
+# --- Language normalization ---
 
-    def initialize(self, **kwargs):
-        self.initialized = kwargs
-
-    def push(self, chunk):
-        self.chunks.append(chunk)
+def test_normalize_sarvam_language_passes_valid_bcp47():
+    assert normalize_sarvam_language("hi-IN") == "hi-IN"
+    assert normalize_sarvam_language("en-IN") == "en-IN"
+    assert normalize_sarvam_language("ta-IN") == "ta-IN"
 
 
-def _wav_bytes(frames: bytes, sample_rate: int = 22050, channels: int = 1, sample_width: int = 2) -> bytes:
-    buffer = io.BytesIO()
-    with wave.open(buffer, "wb") as wav_file:
-        wav_file.setnchannels(channels)
-        wav_file.setsampwidth(sample_width)
-        wav_file.setframerate(sample_rate)
-        wav_file.writeframes(frames)
-    return buffer.getvalue()
+def test_normalize_sarvam_language_resolves_aliases():
+    assert normalize_sarvam_language("english") == "en-IN"
+    assert normalize_sarvam_language("hindi") == "hi-IN"
+    assert normalize_sarvam_language("hinglish") == "en-IN"
+    assert normalize_sarvam_language("en") == "en-IN"
+    assert normalize_sarvam_language("en-US") == "en-IN"
+    assert normalize_sarvam_language("hi") == "hi-IN"
+    assert normalize_sarvam_language("tamil") == "ta-IN"
+    assert normalize_sarvam_language("bengali") == "bn-IN"
+    assert normalize_sarvam_language("telugu") == "te-IN"
 
 
-@pytest.mark.asyncio
-async def test_sarvam_chunked_stream_posts_rest_payload_and_pushes_pcm():
-    """When using the REST endpoint, base64 WAV is decoded into raw PCM."""
-    pcm_bytes = b"\x01\x02\x03\x04"
-    wav_bytes = _wav_bytes(pcm_bytes)
-    response = httpx.Response(
-        200,
-        request=httpx.Request("POST", "https://api.sarvam.ai/text-to-speech"),
-        json={"audios": [base64.b64encode(wav_bytes).decode("ascii")]},
+def test_normalize_sarvam_language_returns_default_for_none():
+    assert normalize_sarvam_language(None) == SARVAM_DEFAULT_LANGUAGE
+    assert normalize_sarvam_language("") == SARVAM_DEFAULT_LANGUAGE
+
+
+def test_normalize_sarvam_language_returns_default_for_unknown():
+    assert normalize_sarvam_language("klingon") == SARVAM_DEFAULT_LANGUAGE
+
+
+# --- Speaker normalization ---
+
+def test_normalize_sarvam_speaker_passes_valid():
+    assert normalize_sarvam_speaker("simran") == "simran"
+    assert normalize_sarvam_speaker("rahul") == "rahul"
+
+
+def test_normalize_sarvam_speaker_normalizes_case():
+    assert normalize_sarvam_speaker("Simran") == "simran"
+    assert normalize_sarvam_speaker("RAHUL") == "rahul"
+
+
+def test_normalize_sarvam_speaker_returns_default_for_invalid():
+    assert normalize_sarvam_speaker(None) == SARVAM_DEFAULT_VOICE
+    assert normalize_sarvam_speaker("nonexistent") == SARVAM_DEFAULT_VOICE
+
+
+# --- Model normalization ---
+
+def test_normalize_sarvam_model_passes_valid():
+    assert normalize_sarvam_model("bulbul:v2") == "bulbul:v2"
+    assert normalize_sarvam_model("bulbul:v3") == "bulbul:v3"
+    assert normalize_sarvam_model("bulbul:v3-beta") == "bulbul:v3-beta"
+
+
+def test_normalize_sarvam_model_returns_default_for_invalid():
+    assert normalize_sarvam_model(None) == SARVAM_DEFAULT_MODEL
+    assert normalize_sarvam_model("tts-1") == SARVAM_DEFAULT_MODEL
+    assert normalize_sarvam_model("sarvam") == SARVAM_DEFAULT_MODEL
+
+
+# --- Official plugin instantiation ---
+
+def test_official_sarvam_tts_instantiates_with_correct_params():
+    from livekit.plugins.sarvam import TTS
+    tts = TTS(
+        target_language_code="en-IN",
+        model="bulbul:v3",
+        speaker="simran",
+        speech_sample_rate=8000,
+        api_key="test-key",
     )
+    assert tts._opts.speaker == "simran"
+    assert tts._opts.model == "bulbul:v3"
+    assert str(tts._opts.target_language_code) == "en-IN"
+    assert tts.sample_rate == 8000
 
-    tts = SarvamTTS(
-        api_key="test-key", voice="simran", model="bulbul:v3",
-        language="en-IN", api_url="https://api.sarvam.ai/text-to-speech",
+
+def test_official_sarvam_tts_default_sample_rate_is_22050():
+    from livekit.plugins.sarvam import TTS
+    tts = TTS(
+        target_language_code="hi-IN",
+        api_key="test-key",
     )
-    stream = tts.synthesize("hello world", conn_options=SimpleNamespace(timeout=5))
-    emitter = _FakeEmitter()
-
-    post = AsyncMock(return_value=response)
-    with patch("outbound.sarvam_tts.httpx.AsyncClient") as client_cls:
-        client_cls.return_value.__aenter__.return_value.post = post
-        await stream._run(emitter)
-
-    _, kwargs = post.call_args
-    assert kwargs["json"] == {
-        "text": "hello world",
-        "target_language_code": "en-IN",
-        "speaker": "simran",
-        "model": "bulbul:v3",
-        "speech_sample_rate": 8000,
-        "pace": 1.0,
-    }
-    assert emitter.initialized["mime_type"] == "audio/pcm"
-    assert emitter.chunks == [pcm_bytes]
+    assert tts.sample_rate == 22050
 
 
-@pytest.mark.asyncio
-async def test_sarvam_streaming_endpoint_pushes_raw_chunks():
-    """When using the /stream endpoint, raw PCM chunks are pushed directly."""
-    chunk1 = b"\xaa" * 4096
-    chunk2 = b"\xbb" * 100
-
-    tts = SarvamTTS(api_key="test-key", voice="simran", model="bulbul:v3", language="en-IN")
-    assert "/stream" in tts._api_url  # default is streaming
-    stream = tts.synthesize("hello world", conn_options=SimpleNamespace(timeout=5))
-    emitter = _FakeEmitter()
-
-    # Mock the streaming response
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-
-    async def _aiter_bytes(chunk_size=4096):
-        yield chunk1
-        yield chunk2
-
-    mock_response.aiter_bytes = _aiter_bytes
-    mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-    mock_response.__aexit__ = AsyncMock(return_value=False)
-
-    mock_client = MagicMock()
-    mock_client.stream = MagicMock(return_value=mock_response)
-
-    with patch("outbound.sarvam_tts.httpx.AsyncClient") as client_cls:
-        client_cls.return_value.__aenter__.return_value = mock_client
-        await stream._run(emitter)
-
-    assert len(emitter.chunks) == 2
-    assert emitter.chunks[0] == chunk1
-    assert emitter.chunks[1] == chunk2
-
-    # Verify the streaming payload includes output_audio_codec
-    call_args = mock_client.stream.call_args
-    payload = call_args.kwargs.get("json") or call_args[1].get("json")
-    assert payload["output_audio_codec"] == "pcm"
-
-
-@pytest.mark.asyncio
-async def test_sarvam_chunked_stream_normalizes_language_aliases():
-    pcm_bytes = b"\x01\x02\x03\x04"
-    wav_bytes = _wav_bytes(pcm_bytes)
-    response = httpx.Response(
-        200,
-        request=httpx.Request("POST", "https://api.sarvam.ai/text-to-speech"),
-        json={"audios": [base64.b64encode(wav_bytes).decode("ascii")]},
-    )
-
-    tts = SarvamTTS(
-        api_key="test-key", voice="simran", model="bulbul:v3",
-        language="english", api_url="https://api.sarvam.ai/text-to-speech",
-    )
-    stream = tts.synthesize("hello world", conn_options=SimpleNamespace(timeout=5))
-    emitter = _FakeEmitter()
-
-    post = AsyncMock(return_value=response)
-    with patch("outbound.sarvam_tts.httpx.AsyncClient") as client_cls:
-        client_cls.return_value.__aenter__.return_value.post = post
-        await stream._run(emitter)
-
-    _, kwargs = post.call_args
-    assert kwargs["json"]["target_language_code"] == "en-IN"
-
-
-@pytest.mark.asyncio
-async def test_sarvam_rest_logs_response_body_before_raise(caplog):
-    """REST fallback logs full error body before raising."""
-    response = httpx.Response(
-        400,
-        request=httpx.Request("POST", "https://api.sarvam.ai/text-to-speech"),
-        text=json.dumps({"error": {"message": "bad payload"}}),
-    )
-
-    tts = SarvamTTS(api_key="test-key", api_url="https://api.sarvam.ai/text-to-speech")
-    stream = tts.synthesize("hello world", conn_options=SimpleNamespace(timeout=5))
-    emitter = _FakeEmitter()
-
-    post = AsyncMock(return_value=response)
-    with patch("outbound.sarvam_tts.httpx.AsyncClient") as client_cls:
-        client_cls.return_value.__aenter__.return_value.post = post
-        with pytest.raises(httpx.HTTPStatusError):
-            await stream._run(emitter)
-
-    assert "bad payload" in caplog.text
-
-
-@pytest.mark.asyncio
-async def test_sarvam_stream_logs_response_body_before_raise(caplog):
-    """Streaming endpoint logs full error body before raising."""
-    tts = SarvamTTS(api_key="test-key")  # defaults to /stream URL
-    stream = tts.synthesize("hello world", conn_options=SimpleNamespace(timeout=5))
-    emitter = _FakeEmitter()
-
-    mock_response = MagicMock()
-    mock_response.status_code = 400
-
-    async def _aread():
-        return json.dumps({"error": {"message": "stream bad payload"}}).encode()
-
-    mock_response.aread = _aread
-    mock_response.raise_for_status = MagicMock(
-        side_effect=httpx.HTTPStatusError(
-            "400", request=httpx.Request("POST", SARVAM_STREAM_URL), response=mock_response,
-        )
-    )
-    mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-    mock_response.__aexit__ = AsyncMock(return_value=False)
-
-    mock_client = MagicMock()
-    mock_client.stream = MagicMock(return_value=mock_response)
-
-    with patch("outbound.sarvam_tts.httpx.AsyncClient") as client_cls:
-        client_cls.return_value.__aenter__.return_value = mock_client
-        with pytest.raises(httpx.HTTPStatusError):
-            await stream._run(emitter)
-
-    assert "stream bad payload" in caplog.text
-
-
-def test_extract_pcm_returns_raw_frames_for_wav_bytes():
-    pcm_bytes = b"\x10\x20\x30\x40"
-    assert _extract_pcm(_wav_bytes(pcm_bytes)) == pcm_bytes
-
-
-def test_extract_pcm_leaves_non_wav_bytes_unchanged():
-    pcm_bytes = b"\x10\x20\x30\x40"
-    assert _extract_pcm(pcm_bytes) == pcm_bytes
+def test_sarvam_sample_rate_constant_is_8000():
+    """PSTN requires 8kHz - our constant must match."""
+    assert SARVAM_SAMPLE_RATE == 8000
 
 
 def test_normalize_sarvam_language_maps_aliases_to_supported_codes():

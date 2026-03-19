@@ -27,8 +27,8 @@ from livekit.agents import (
     get_job_context,
 )
 from livekit.agents.llm import function_tool
-from livekit.plugins import deepgram, openai, cartesia, silero
-from outbound.sarvam_tts import SarvamTTS, normalize_sarvam_language
+from livekit.plugins import deepgram, openai, cartesia, silero, sarvam
+from outbound.sarvam_tts import normalize_sarvam_language
 import groq # Import Groq library
 
 DEEPGRAM_TTS_URL = os.environ.get("DEEPGRAM_TTS_URL", "https://api.deepgram.com/v1/speak")
@@ -488,10 +488,11 @@ async def entrypoint(ctx: JobContext):
         )
     elif ai_config["tts_provider"] == "sarvam":
         logger.info(f"Using Sarvam TTS based on database config")
-        tts = SarvamTTS(
-            voice=ai_config.get("tts_voice"),
+        tts = sarvam.TTS(
+            speaker=ai_config.get("tts_voice"),
             model=ai_config.get("tts_model"),
-            language=normalize_sarvam_language(ai_config.get("tts_language")),
+            target_language_code=normalize_sarvam_language(ai_config.get("tts_language")),
+            speech_sample_rate=8000,
         )
     elif ai_config["tts_provider"] == "deepgram":
         logger.info(f"Using Deepgram TTS based on database config")

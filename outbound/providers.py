@@ -3,7 +3,7 @@ import os
 from typing import Any, Dict, Optional
 
 import httpx
-from livekit.plugins import cartesia, deepgram, inworld, openai
+from livekit.plugins import cartesia, deepgram, inworld, openai, sarvam
 
 import config as default_config
 from outbound.sarvam_tts import (
@@ -11,7 +11,6 @@ from outbound.sarvam_tts import (
     SARVAM_DEFAULT_VOICE,
     SARVAM_SAMPLE_RATE,
     VALID_SARVAM_SPEAKERS,
-    SarvamTTS,
     normalize_sarvam_language,
     normalize_sarvam_model,
     normalize_sarvam_speaker,
@@ -229,8 +228,13 @@ def build_tts(ai_config: Dict[str, Any], metadata_overrides: Optional[Dict[str, 
         return inworld.TTS(voice=voice)
 
     if provider == "sarvam":
-        logger.info(f"Using Sarvam TTS: {model}/{voice}/{language}")
-        return SarvamTTS(voice=voice, model=model, language=language, sample_rate=SARVAM_SAMPLE_RATE)
+        logger.info(f"Using Sarvam TTS (official plugin): {model}/{voice}/{language}")
+        return sarvam.TTS(
+            model=model,
+            speaker=voice,
+            target_language_code=language,
+            speech_sample_rate=SARVAM_SAMPLE_RATE,
+        )
 
     logger.info(f"Using OpenAI TTS: {model}/{voice}")
     return openai.TTS(model=model, voice=voice)

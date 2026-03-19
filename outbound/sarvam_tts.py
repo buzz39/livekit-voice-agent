@@ -262,7 +262,7 @@ class _SarvamChunkedStream(ChunkedStream):
         async with httpx.AsyncClient() as client:
             # Use the streaming endpoint for lower time-to-first-byte
             if "/stream" in self._api_url:
-                payload["output_audio_codec"] = "pcm"
+                payload["output_audio_codec"] = "mulaw"
                 async with client.stream(
                     "POST",
                     self._api_url,

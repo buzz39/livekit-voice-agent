@@ -1016,6 +1016,19 @@ wheels = [
 ]
 
 [[package]]
+name = "livekit-plugins-sarvam"
+version = "1.2.18"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "livekit-agents", extra = ["codecs"] },
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/be/49/10f39465f4cb23cb45a8ea321e72559d3ee2fb65f6a1a8fddd919764f979/livekit_plugins_sarvam-1.2.18.tar.gz", hash = "sha256:7164d81c7cfa4851faca007b04ca9d080cf4fdfeabd01365b0c0b43cd7ebdc63", size = 18172, upload-time = "2025-11-05T19:33:31.943Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/32/e9/c06a3e1417960609fc800b33c9f5d6cc94774eb9ce4be36d83b901b3dfef/livekit_plugins_sarvam-1.2.18-py3-none-any.whl", hash = "sha256:61ed1caa7656eaab48cddff7030a5e958a5d1b822f3831b06f9e06cf1fe336e7", size = 19779, upload-time = "2025-11-05T19:33:30.766Z" },
+]
+
+[[package]]
 name = "livekit-plugins-silero"
 version = "1.2.18"
 source = { registry = "https://pypi.org/simple" }
@@ -1072,6 +1085,7 @@ dependencies = [
     { name = "livekit-agents", extra = ["cartesia", "deepgram", "openai", "silero", "turn-detector"] },
     { name = "livekit-plugins-inworld" },
     { name = "livekit-plugins-noise-cancellation" },
+    { name = "livekit-plugins-sarvam" },
     { name = "mcp" },
     { name = "python-dotenv" },
     { name = "uvicorn" },
@@ -1095,6 +1109,7 @@ requires-dist = [
     { name = "livekit-agents", extras = ["cartesia", "deepgram", "openai", "silero", "turn-detector"], specifier = "<1.3" },
     { name = "livekit-plugins-inworld", specifier = ">=1.2.18" },
     { name = "livekit-plugins-noise-cancellation", specifier = "~=0.2" },
+    { name = "livekit-plugins-sarvam", specifier = "~=1.2" },
     { name = "mcp", specifier = ">=0.9.0" },
     { name = "python-dotenv", specifier = ">=1.1.1" },
     { name = "uvicorn", specifier = ">=0.27.0" },
