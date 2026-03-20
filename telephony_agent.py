@@ -5,7 +5,7 @@ A production-ready voice AI agent for handling inbound phone calls with:
 - Natural language conversations powered by configurable LLM (OpenAI / Groq)
 - High-quality speech recognition (Deepgram Nova-3)
 - Flexible text-to-speech (Cartesia, OpenAI, Sarvam, Inworld, Deepgram)
-- Telephony-optimised noise cancellation (BVCTelephony)
+- Telephony-optimized noise cancellation (BVCTelephony)
 - STT-based turn detection for natural conversation flow
 - Integration with n8n workflows via Model Context Protocol (MCP)
 - Extensible function tools for custom capabilities
@@ -284,7 +284,7 @@ async def entrypoint(ctx: JobContext):
     stt = build_stt(ai_config=ai_config, metadata_overrides=metadata_overrides or None)
     tts = build_tts(ai_config=ai_config, metadata_overrides=metadata_overrides or None)
 
-    # Configure the voice processing pipeline optimised for telephony.
+    # Configure the voice processing pipeline optimized for telephony.
     # - STT-based turn detection avoids the Silero VAD inference delay on
     #   constrained CPU budgets and lets Deepgram's endpointing handle
     #   silence/speech gating natively.
@@ -295,13 +295,7 @@ async def entrypoint(ctx: JobContext):
         tts=tts,
     )
     
-    # Listen for participant disconnect
-    @ctx.room.on("participant_disconnected")
-    def on_participant_disconnected(participant):
-        if participant.identity == phone_number:
-            logger.info(f"Participant {participant.identity} disconnected")
-    
-    # Start the agent session with telephony-optimised noise cancellation
+    # Start the agent session with telephony-optimized noise cancellation
     call_start_time = datetime.datetime.now()
     await session.start(
         agent=agent,

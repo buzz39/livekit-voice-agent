@@ -97,7 +97,7 @@ class TestSharedProviderReuse:
 
 
 class TestNoiseCancellationIntegration:
-    """Verify telephony-optimised noise cancellation is wired up."""
+    """Verify telephony-optimized noise cancellation is wired up."""
 
     def test_bvc_telephony_importable(self):
         from livekit.plugins import noise_cancellation
