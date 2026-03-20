@@ -1,14 +1,15 @@
 """
 LiveKit AI Telephony Agent with n8n MCP Integration
 
-A production-ready voice AI agent for handling phone calls with:
-- Natural language conversations powered by GPT-4o-mini
+A production-ready voice AI agent for handling inbound phone calls with:
+- Natural language conversations powered by configurable LLM (OpenAI / Groq)
 - High-quality speech recognition (Deepgram Nova-3)
-- Natural text-to-speech (Cartesia Sonic-2)
+- Flexible text-to-speech (Cartesia, OpenAI, Sarvam, Inworld, Deepgram)
+- Telephony-optimised noise cancellation (BVCTelephony)
+- STT-based turn detection for natural conversation flow
 - Integration with n8n workflows via Model Context Protocol (MCP)
 - Extensible function tools for custom capabilities
 
-Author: Your Name/Company
 License: MIT
 """
 
@@ -16,7 +17,6 @@ import datetime
 import logging
 import json
 import os
-from pathlib import Path
 from dotenv import load_dotenv
 from livekit.agents import (
     Agent,
@@ -27,139 +27,23 @@ from livekit.agents import (
     get_job_context,
 )
 from livekit.agents.llm import function_tool
-from livekit.plugins import deepgram, openai, cartesia, silero, sarvam
-from outbound.sarvam_tts import normalize_sarvam_language
-import groq # Import Groq library
-
-DEEPGRAM_TTS_URL = os.environ.get("DEEPGRAM_TTS_URL", "https://api.deepgram.com/v1/speak")
-DEEPGRAM_TTS_VOICE = os.environ.get("DEEPGRAM_TTS_VOICE", "aura-angus-en") # Default Deepgram voice
-
-async def deepgram_tts(text: str, voice_id: str = DEEPGRAM_TTS_VOICE) -> bytes:
-    deepgram_api_key = os.environ.get("DEEPGRAM_API_KEY")
-    if not deepgram_api_key:
-        logger.error("DEEPGRAM_API_KEY not set")
-        raise ValueError("Deepgram API key not found.")
-    
-    headers = {
-        "Authorization": f"Token {deepgram_api_key}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "text": text,
-        "model": voice_id,
-        "encoding": "linear16", # LiveKit expects raw audio
-        "sample_rate": 16000 # LiveKit expects 16kHz
-    }
-    
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(DEEPGRAM_TTS_URL, json=payload, headers=headers, timeout=10.0)
-            response.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
-            return response.content
-        except httpx.RequestError as exc:
-            logger.error(f"An error occurred while requesting Deepgram TTS: {exc}")
-            raise
-        except httpx.HTTPStatusError as exc:
-            logger.error(f"Deepgram TTS HTTP error for {exc.request.url}: {exc.response.status_code} - {exc.response.text}")
-            raise
-
-
+from livekit.agents.voice.room_io import RoomInputOptions
+from livekit.plugins import noise_cancellation
 from livekit import api
 from mcp_integration import load_mcp_tools
-import os
-import base64
-import io
 import httpx
-import wave
 from neon_db import get_db
+from outbound.providers import (
+    build_llm,
+    build_stt,
+    build_tts,
+    resolve_ai_configuration,
+)
+from outbound.config import load_ai_config
+    
 
 load_dotenv()
 logger = logging.getLogger("telephony-agent")
-
-SARVAM_API_URL = os.environ.get("SARVAM_API_URL", "https://api.sarvam.ai/text-to-speech")
-SARVAM_VOICE_ID = os.environ.get("SARVAM_VOICE_ID", "simran")
-SARVAM_MODEL = os.environ.get("SARVAM_MODEL", "bulbul:v3")
-
-async def sarvam_tts(text: str, voice_id: str = SARVAM_VOICE_ID) -> bytes:
-    sarvam_api_key = os.environ.get("SARVAM_API_KEY")
-    if not sarvam_api_key:
-        logger.error("SARVAM_API_KEY not set")
-        raise ValueError("Sarvam AI API key not found.")
-    
-    headers = {
-        "api-subscription-key": sarvam_api_key,
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "text": text,
-        "target_language_code": "en-IN",
-        "speaker": voice_id,
-        "model": SARVAM_MODEL,
-        "speech_sample_rate": 22050,
-        "pace": 1.0,
-    }
-    
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(SARVAM_API_URL, json=payload, headers=headers, timeout=10.0)
-            if response.status_code != 200:
-                logger.error(f"Sarvam TTS HTTP error for {response.request.url}: {response.status_code} - {response.text}")
-                response.raise_for_status()
-
-            data = response.json()
-            audios = data.get("audios") or []
-            if not audios:
-                raise ValueError(f"Sarvam TTS response missing audio payload: {data}")
-
-            audio_bytes = base64.b64decode(audios[0])
-            if audio_bytes.startswith(b"RIFF"):
-                with wave.open(io.BytesIO(audio_bytes), "rb") as wav_file:
-                    return wav_file.readframes(wav_file.getnframes())
-            return audio_bytes
-        except httpx.RequestError as exc:
-            logger.error(f"An error occurred while requesting Sarvam TTS: {exc}")
-            raise
-        except httpx.HTTPStatusError as exc:
-            logger.error(f"Sarvam TTS HTTP error for {exc.request.url}: {exc.response.status_code} - {exc.response.text}")
-            raise
-
-
-GROQ_API_URL = os.environ.get("GROQ_API_URL", "https://api.groq.com/openai/v1/chat/completions")
-
-async def groq_llm_chat(messages: list, model: str) -> str:
-    groq_api_key = os.environ.get("GROQ_API_KEY")
-    if not groq_api_key:
-        logger.error("GROQ_API_KEY not set")
-        raise ValueError("Groq API key not found.")
-
-    headers = {
-        "Authorization": f"Bearer {groq_api_key}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": 0.7 # Using a default temperature
-    }
-
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(GROQ_API_URL, json=payload, headers=headers, timeout=30.0)
-            response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"]
-        except httpx.RequestError as exc:
-            logger.error(f"An error occurred while requesting Groq LLM: {exc}")
-            raise
-        except httpx.HTTPStatusError as exc:
-            logger.error(f"Groq LLM HTTP error for {exc.request.url}: {exc.response.status_code} - {exc.response.text}")
-            raise
-        except Exception as e:
-            logger.error(f"An unexpected error occurred in groq_llm_chat: {e}")
-            raise
-
-
-# Agent instructions will be loaded from Neon database
-AGENT_INSTRUCTIONS = None  # Will be fetched from database
 
 
 async def hangup_call():
@@ -358,35 +242,26 @@ async def entrypoint(ctx: JobContext):
     # but based on previous code it seemed to take a name.
     prompt_id = await db.get_prompt_id(agent_slug)
     
-    # Fetch AI configuration from database
-    # This remains shared for now unless we want per-agent AI configs (e.g. different voices)
-    # For now, keeping it global or we could fetch it FROM agent_config later if we linked them.
+    # Fetch AI configuration from database (agent-specific, then default fallback)
     logger.info("Fetching AI configuration from Neon database...")
-    ai_config = await db.get_ai_config("default_telephony_config")
-    
-    if not ai_config:
-        logger.warning("No AI config found in database, using defaults")
-        ai_config = {
-            "llm_provider": "openai",
-            "llm_model": "gpt-4o-mini",
-            "llm_temperature": 0.7,
-            "stt_provider": "deepgram",
-            "stt_model": "nova-3",
-            "stt_language": "en-US",
-            "tts_provider": "cartesia",
-            "tts_model": "sonic-2",
-            "tts_voice": "a0e99841-438c-4a64-b679-ae501e7d6091",
-            "tts_language": "en-IN",
-            "tts_speed": 1.0
-        }
-    
-    logger.info(f"Using LLM: {ai_config['llm_provider']}/{ai_config['llm_model']}")
-    logger.info(f"Using STT: {ai_config['stt_provider']}/{ai_config['stt_model']}")
-    logger.info(f"Using TTS: {ai_config['tts_provider']}/{ai_config['tts_model']}")
+    ai_config = await load_ai_config(db, agent_slug)
+
+    # Apply UI config overrides as metadata-level overrides for the shared provider builders
+    metadata_overrides = {}
+    if ui_config.get("tts_provider"):
+        metadata_overrides["tts_provider"] = ui_config["tts_provider"]
+        logger.info(f"TTS provider overridden by UI config: {ui_config['tts_provider']}")
+
+    resolved = resolve_ai_configuration(ai_config=ai_config, metadata_overrides=metadata_overrides or None)
+    logger.info(
+        "Resolved telephony AI pipeline: llm=%s/%s, stt=%s/%s, tts=%s/%s voice=%s",
+        resolved["llm_provider"], resolved["llm_model"],
+        resolved["stt_provider"], f'{resolved["stt_model"]}/{resolved["stt_language"]}',
+        resolved["tts_provider"], resolved["tts_model"], resolved["tts_voice"],
+    )
     
     # Load MCP tools from n8n server
     logger.info("Loading MCP tools...")
-    # Use dynamic URL if present, otherwise fallback to env
     mcp_tools = await load_mcp_tools(mcp_url=agent_config.get("mcp_endpoint_url"))
     logger.info(f"Loaded {len(mcp_tools)} MCP tools")
     
@@ -404,139 +279,37 @@ async def entrypoint(ctx: JobContext):
         tools=all_tools
     )
     
-    # Configure LLM based on database config and environment variable override
-    llm_provider_env = os.environ.get("LLM_PROVIDER", "").lower()
-    
-    if llm_provider_env == "groq":
-        logger.info(f"Using Groq LLM based on LLM_PROVIDER environment variable")
-        groq_model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
-        llm = openai.LLM(model=groq_model, temperature=float(ai_config.get("llm_temperature", 0.7)), base_url=GROQ_API_URL, api_key=os.environ.get("GROQ_API_KEY")) # Use OpenAI LLM class with Groq endpoint
-    elif llm_provider_env == "openai" or ai_config["llm_provider"] == "openai":
-        logger.info(f"Using OpenAI LLM")
-        llm = openai.LLM(
-            model=ai_config["llm_model"],
-            temperature=float(ai_config["llm_temperature"])
-        )
-    else:
-        logger.warning(f"Unsupported LLM provider: {ai_config['llm_provider']} or {llm_provider_env}, using OpenAI as fallback")
-        llm = openai.LLM(model="gpt-4o-mini", temperature=0.7)
-    
-    # Configure STT based on database config
-    if ai_config["stt_provider"] == "deepgram":
-        stt = deepgram.STT(
-            model=ai_config["stt_model"],
-            language=ai_config["stt_language"],
-            interim_results=True,
-            punctuate=True,
-            smart_format=True,
-            filler_words=True,
-            endpointing_ms=25,
-            sample_rate=16000
-        )
-    else:
-        logger.warning(f"Unsupported STT provider: {ai_config['stt_provider']}, using Deepgram")
-        stt = deepgram.STT(model="nova-3", language="en-US")
-    
-    # Configure TTS based on database config, with UI config > env variable override
-    # Priority: UI config (from /api/config) > TTS_PROVIDER env var > DB ai_config
-    tts_provider_env = os.environ.get("TTS_PROVIDER", "").lower()
-    # Apply UI config override if set
-    if ui_config.get("tts_provider"):
-        tts_provider_env = ui_config["tts_provider"].lower()
-        logger.info(f"TTS provider overridden by UI config: {tts_provider_env}")
+    # Build providers via shared module (handles fallback, Groq compat, etc.)
+    llm = build_llm(ai_config=ai_config, metadata_overrides=metadata_overrides or None)
+    stt = build_stt(ai_config=ai_config, metadata_overrides=metadata_overrides or None)
+    tts = build_tts(ai_config=ai_config, metadata_overrides=metadata_overrides or None)
 
-    # Prioritize environment variable if set and valid
-    if tts_provider_env == "sarvam":
-        logger.info(f"Using Sarvam TTS based on TTS_PROVIDER environment variable")
-        # For Sarvam, we'll use a custom function later in session.generate_reply
-        # For now, we'll set a placeholder or use openai for structure
-        tts = openai.TTS(model="tts-1", voice="alloy") # Placeholder, actual call will be custom
-    elif tts_provider_env == "deepgram":
-        logger.info(f"Using Deepgram TTS based on TTS_PROVIDER environment variable")
-        # Placeholder, actual call will be custom
-        tts = openai.TTS(model="tts-1", voice="alloy") # Placeholder, actual call will be custom
-    elif tts_provider_env == "cartesia":
-        logger.info(f"Using Cartesia TTS based on TTS_PROVIDER environment variable")
-        tts = cartesia.TTS(
-            model=ai_config["tts_model"],
-            voice=ai_config["tts_voice"],
-            language=ai_config["tts_language"],
-            speed=float(ai_config["tts_speed"]),
-            sample_rate=16000
-        )
-    elif tts_provider_env == "openai":
-        logger.info(f"Using OpenAI TTS based on TTS_PROVIDER environment variable")
-        tts = openai.TTS(
-            model=ai_config.get("tts_model", "tts-1"),
-            voice=ai_config.get("tts_voice", "alloy"),
-        )
-    # Fallback to database config if no valid env var is set
-    elif ai_config["tts_provider"] == "cartesia":
-        logger.info(f"Using Cartesia TTS based on database config")
-        tts = cartesia.TTS(
-            model=ai_config["tts_model"],
-            voice=ai_config["tts_voice"],
-            language=ai_config["tts_language"],
-            speed=float(ai_config["tts_speed"]),
-            sample_rate=16000
-        )
-    elif ai_config["tts_provider"] == "openai":
-        logger.info(f"Using OpenAI TTS based on database config")
-        tts = openai.TTS(
-            model=ai_config.get("tts_model", "tts-1"),
-            voice=ai_config.get("tts_voice", "alloy"),
-        )
-    elif ai_config["tts_provider"] == "sarvam":
-        logger.info(f"Using Sarvam TTS based on database config")
-        tts = sarvam.TTS(
-            speaker=ai_config.get("tts_voice"),
-            model=ai_config.get("tts_model"),
-            target_language_code=normalize_sarvam_language(ai_config.get("tts_language")),
-            speech_sample_rate=8000,
-        )
-    elif ai_config["tts_provider"] == "deepgram":
-        logger.info(f"Using Deepgram TTS based on database config")
-        # Placeholder, actual call will be custom
-        tts = openai.TTS(model="tts-1", voice="alloy")
-    else:
-        logger.warning(f"Unsupported TTS provider: {ai_config['tts_provider']} or {tts_provider_env}, using OpenAI TTS as fallback")
-        tts = openai.TTS(model="tts-1", voice="alloy")
-    
-    # Configure the voice processing pipeline optimized for telephony
-    # Use VAD settings from DB if available
+    # Configure the voice processing pipeline optimised for telephony.
+    # - STT-based turn detection avoids the Silero VAD inference delay on
+    #   constrained CPU budgets and lets Deepgram's endpointing handle
+    #   silence/speech gating natively.
     session = AgentSession(
-        vad=silero.VAD.load(),
+        turn_detection="stt",
         stt=stt,
         llm=llm,
-        tts=tts
+        tts=tts,
     )
-    
-    # Override TTS generation for Deepgram if selected (Sarvam now uses proper plugin)
-    if tts_provider_env == "deepgram" or ai_config["tts_provider"] == "deepgram":
-        async def deepgram_generate_speech(text: str) -> bytes:
-            return await deepgram_tts(text, voice_id=ai_config.get("tts_voice", DEEPGRAM_TTS_VOICE))
-        if hasattr(session, "_generate_speech"):
-            session._generate_speech = deepgram_generate_speech
-            logger.info("Overridden session._generate_speech for Deepgram TTS")
-        else:
-            logger.error("AgentSession has no '_generate_speech' — Deepgram TTS override skipped")
-
-    # Track if call was ended by agent
-    call_ended_by_agent = False
     
     # Listen for participant disconnect
     @ctx.room.on("participant_disconnected")
     def on_participant_disconnected(participant):
-        nonlocal call_ended_by_agent
         if participant.identity == phone_number:
             logger.info(f"Participant {participant.identity} disconnected")
-            # If user hung up, we should end the session
-            if not call_ended_by_agent:
-                logger.info("User hung up, ending session")
     
-    # Start the agent session
+    # Start the agent session with telephony-optimised noise cancellation
     call_start_time = datetime.datetime.now()
-    await session.start(agent=agent, room=ctx.room)
+    await session.start(
+        agent=agent,
+        room=ctx.room,
+        room_input_options=RoomInputOptions(
+            noise_cancellation=noise_cancellation.BVCTelephony(),
+        ),
+    )
     
     # Trigger outbound opener immediately
     opening_line = agent_config.get("opening_line") or "Start the call with your outbound opening line immediately. Speak confidently and naturally."

@@ -12,7 +12,7 @@ from livekit.agents import (
     get_job_context,
 )
 from livekit.agents.voice.room_io import RoomInputOptions
-import groq # Import Groq library
+from livekit.plugins import noise_cancellation
 from livekit import api
 from livekit import rtc
 
@@ -287,7 +287,10 @@ async def _run_entrypoint(ctx: JobContext):
             await session.start(
                 agent=agent,
                 room=ctx.room,
-                room_input_options=RoomInputOptions(close_on_disconnect=False),
+                room_input_options=RoomInputOptions(
+                    noise_cancellation=noise_cancellation.BVCTelephony(),
+                    close_on_disconnect=False,
+                ),
             )
         except Exception as e:
             error_message = (
