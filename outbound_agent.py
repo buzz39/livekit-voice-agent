@@ -46,6 +46,8 @@ except ImportError:
 load_dotenv()
 logger = logging.getLogger("outbound-agent")
 
+LLM_ERROR_FALLBACK_MESSAGE = "Give me just a moment, I need to gather my thoughts."
+
 if not WHISPEY_ENABLED:
     logger.warning("Whispey not installed. Install with: pip install whispey")
 
@@ -278,7 +280,7 @@ async def _run_entrypoint(ctx: JobContext):
         if is_llm:
             call_metadata["notes"].append(f"LLM error: {underlying}")
             try:
-                session.say("Give me just a moment, I need to gather my thoughts.")
+                session.say(LLM_ERROR_FALLBACK_MESSAGE)
             except Exception:
                 logger.warning("Failed to speak LLM error fallback message")
 

@@ -143,7 +143,9 @@ class TestSimplifiedPromptInstructions:
 
         instructions = await prepare_instructions(mock_db, "test_agent", [])
 
-        # Should still mention email spelling
+        # Should still mention email spelling and confirmation
         assert "spell" in instructions.lower()
+        assert "confirm" in instructions.lower()
+        assert "update_call_data" in instructions
         # But should NOT have the overly forceful "MUST" phrasing
         assert "you MUST spell" not in instructions

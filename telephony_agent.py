@@ -46,6 +46,8 @@ from outbound.config import load_ai_config
 load_dotenv()
 logger = logging.getLogger("telephony-agent")
 
+LLM_ERROR_FALLBACK_MESSAGE = "Give me just a moment, I need to gather my thoughts."
+
 
 async def hangup_call():
     """End the call for all participants."""
@@ -308,7 +310,7 @@ async def entrypoint(ctx: JobContext):
         if is_llm:
             call_metadata["notes"].append(f"LLM error: {underlying}")
             try:
-                session.say("Give me just a moment, I need to gather my thoughts.")
+                session.say(LLM_ERROR_FALLBACK_MESSAGE)
             except Exception:
                 logger.warning("Failed to speak LLM error fallback message")
 
