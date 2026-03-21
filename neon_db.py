@@ -385,7 +385,7 @@ class NeonDB:
         ``tts_language``, etc.
         """
         async with self.pool.acquire() as conn:
-            await conn.execute("""
+            result = await conn.execute("""
                 UPDATE ai_configs
                 SET
                     llm_provider   = COALESCE($2, llm_provider),
@@ -394,6 +394,9 @@ class NeonDB:
                     updated_at     = NOW()
                 WHERE name = $1 AND is_active = true
             """, name, kwargs.get("llm_provider"), kwargs.get("tts_provider"), kwargs.get("tts_language"))
+            # result is e.g. "UPDATE 1" or "UPDATE 0"
+            if result and result.endswith("0"):
+                logger.warning("update_ai_config: no active config row found for name=%s", name)
 
 
 async def get_db() -> NeonDB:

@@ -215,7 +215,10 @@ async def save_agent_config(request: AgentConfigRequest):
             final_prompt = final_prompt.replace("{agent_name}", request.agent_name)
         await db_instance.update_active_prompt(agent_slug, final_prompt)
 
-    # Persist AI provider settings to the ai_configs table
+    # Persist AI provider settings to the ai_configs table.
+    # AI provider settings (LLM, TTS, STT) are infrastructure-level and shared
+    # across agents via the "default_telephony_config" row.  Agent-specific
+    # behaviour differences are captured in the *prompts* table instead.
     await db_instance.update_ai_config(
         name="default_telephony_config",
         llm_provider=request.llm_provider or None,

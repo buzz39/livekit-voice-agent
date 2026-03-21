@@ -111,9 +111,12 @@ class TestSingleSourceOfTruth:
         assert "/api/config" not in src
 
     def test_telephony_no_system_prompt_override(self):
-        """telephony_agent must NOT override the DB prompt with a UI-supplied one."""
+        """telephony_agent must NOT override the DB prompt with a runtime one."""
         src = self._telephony_source()
-        assert 'system_prompt' not in src
+        # The specific pattern we eliminated: fetching system_prompt from an
+        # external config and overriding the DB-provided instructions.
+        assert 'ui_config["system_prompt"]' not in src
+        assert "system_prompt" not in src
 
     def test_outbound_uses_same_shared_config(self):
         src = self._outbound_source()
