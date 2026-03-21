@@ -16,7 +16,6 @@ License: MIT
 import datetime
 import logging
 import json
-import os
 from dotenv import load_dotenv
 from livekit.agents import (
     Agent,
@@ -30,9 +29,7 @@ from livekit.agents.llm import function_tool, LLMError
 from livekit.agents.voice.room_io import RoomInputOptions
 from livekit.agents.voice.events import ErrorEvent
 from livekit.plugins import noise_cancellation
-from livekit import api
 from mcp_integration import load_mcp_tools
-import httpx
 from neon_db import get_db
 from outbound.providers import (
     build_llm,
@@ -40,7 +37,7 @@ from outbound.providers import (
     build_tts,
     resolve_ai_configuration,
 )
-from outbound.config import load_ai_config
+from outbound.config import load_agent_config, prepare_instructions, load_ai_config
     
 
 load_dotenv()
@@ -63,7 +60,6 @@ async def hangup_call():
         logger.error(f"Failed to disconnect room: {e}")
 
 
-from webhook_dispatcher import WebhookDispatcher
 
 async def entrypoint(ctx: JobContext):
     """Main entry point for the telephony voice agent."""
@@ -145,29 +141,12 @@ async def entrypoint(ctx: JobContext):
         except json.JSONDecodeError:
             logger.warning("Could not parse room metadata")
             
-    # Fetch agent configuration (greeting, MCP URL) - EARLY CHECK
-    logger.info(f"Fetching configuration for agent: {agent_slug}")
-    agent_config = await db.get_agent_config(agent_slug)
-    
-    # If explicit agent slug failed (not active or not found), try default
-    if not agent_config and agent_slug != "default_roofing_agent":
-        logger.warning(f"Agent {agent_slug} not found or inactive, falling back to default")
-        agent_slug = "default_roofing_agent"
-        agent_config = await db.get_agent_config(agent_slug)
+    # ── Load all configuration from the database (single source of truth) ──
+    # Uses the same shared helpers as outbound_agent.py so that every call
+    # — inbound or outbound — resolves the identical config for a given slug.
+    logger.info(f"Loading configuration for agent: {agent_slug}")
+    agent_config, schema_fields, dispatcher, agent_slug = await load_agent_config(db, agent_slug)
 
-    # If still no config (even default is broken/inactive), use hardcoded fallback or exit
-    if not agent_config:
-        logger.error(f"CRITICAL: Active configuration for {agent_slug} not found. Using bare defaults.")
-        agent_config = {}
-    
-    # Fetch schema fields and Webhooks using the RESOLVED slug
-    logger.info(f"Fetching data schema and webhooks for {agent_slug}...")
-    schema_fields = await db.get_data_schema(agent_slug)
-    webhooks = await db.get_webhooks(agent_slug)
-    
-    # Initialize Webhook Dispatcher
-    dispatcher = WebhookDispatcher(webhooks, agent_slug)
-    
     # Fire call.started event
     await dispatcher.dispatch("call.started", {
         "phone_number": phone_number,
@@ -176,62 +155,9 @@ async def entrypoint(ctx: JobContext):
         "agent_slug": agent_slug
     })
 
-    # ── UI Config override ────────────────────────────────────────────────────
-    # Fetch the active agent config set by the frontend /api/config endpoint.
-    # If a system_prompt was provided there, it overrides the DB prompt.
-    ui_config = {}
-    try:
-        server_base = os.environ.get("SERVER_BASE_URL", "http://localhost:8000")
-        async with httpx.AsyncClient() as _client:
-            _resp = await _client.get(f"{server_base}/api/config", timeout=3.0)
-            if _resp.status_code == 200:
-                ui_config = _resp.json()
-                logger.info(f"Loaded UI config: company={ui_config.get('company_name')}, tts={ui_config.get('tts_provider')}")
-    except Exception as _e:
-        logger.warning(f"Could not fetch UI config from server: {_e}")
-
-    # Resolve company_name / agent_name from UI config (fallback to room metadata / defaults)
-    ui_company_name = ui_config.get("company_name") or business_name
-    ui_agent_name = ui_config.get("agent_name") or "Aisha"
-
-    # Fetch agent instructions from database
-    logger.info(f"Fetching agent instructions for {agent_slug}...")
-    # Update get_active_prompt to take the slug (it was defaulting implicitly before)
-    # Warning: neon_db.get_active_prompt signature might need check if it takes slug param correctly
-    # Checking neon_db.py content from previous views... yes, it takes `name`.
-    agent_instructions = await db.get_active_prompt(agent_slug) 
-    if not agent_instructions:
-        logger.error("No active prompt found in database, using fallback")
-        agent_instructions = "You are a professional caller."
-
-    # Override with UI-supplied system prompt if non-empty
-    if ui_config.get("system_prompt", "").strip():
-        agent_instructions = ui_config["system_prompt"]
-        logger.info("Using system prompt from UI config")
-
-    # Substitute {company_name} and {agent_name} placeholders
-    agent_instructions = agent_instructions.replace("{company_name}", ui_company_name)
-    agent_instructions = agent_instructions.replace("{agent_name}", ui_agent_name)
+    # Fetch and prepare agent instructions from database (with schema injection)
+    agent_instructions = await prepare_instructions(db, agent_slug, schema_fields)
     logger.info(f"Agent instructions ready (first 120 chars): {agent_instructions[:120]}")
-    
-    # Inject schema into instructions
-    if schema_fields:
-        schema_prompt = "\n\nYou are authorized to collect the following information:\n"
-        for field in schema_fields:
-            field_name = field['field_name']
-            desc = field.get('description', 'No description found')
-            rules = field.get('validation_rules')
-            
-            schema_prompt += f"- {field_name}: {desc}"
-            if rules:
-                schema_prompt += f" (Allowed values: {rules})"
-            schema_prompt += "\n"
-            
-        schema_prompt += "\nUse the `update_call_data` tool to save these values."
-        
-        # Append to existing instructions
-        agent_instructions += schema_prompt
-        logger.info(f"Injected {len(schema_fields)} fields into prompt")
 
     # Create or update contact in database
     contact_id = await db.upsert_contact(
@@ -240,22 +166,13 @@ async def entrypoint(ctx: JobContext):
     )
     logger.info(f"Contact ID: {contact_id}")
     
-    # Get prompt ID for logging implementation
-    # Note: get_prompt_id likely needs the slug too if it's agent specific, 
-    # but based on previous code it seemed to take a name.
     prompt_id = await db.get_prompt_id(agent_slug)
     
     # Fetch AI configuration from database (agent-specific, then default fallback)
-    logger.info("Fetching AI configuration from Neon database...")
+    logger.info("Fetching AI configuration from database...")
     ai_config = await load_ai_config(db, agent_slug)
 
-    # Apply UI config overrides as metadata-level overrides for the shared provider builders
-    metadata_overrides = {}
-    if ui_config.get("tts_provider"):
-        metadata_overrides["tts_provider"] = ui_config["tts_provider"]
-        logger.info(f"TTS provider overridden by UI config: {ui_config['tts_provider']}")
-
-    resolved = resolve_ai_configuration(ai_config=ai_config, metadata_overrides=metadata_overrides or None)
+    resolved = resolve_ai_configuration(ai_config=ai_config)
     logger.info(
         "Resolved telephony AI pipeline: llm=%s/%s, stt=%s/%s, tts=%s/%s voice=%s",
         resolved["llm_provider"], resolved["llm_model"],
@@ -283,9 +200,9 @@ async def entrypoint(ctx: JobContext):
     )
     
     # Build providers via shared module (handles fallback, Groq compat, etc.)
-    llm = build_llm(ai_config=ai_config, metadata_overrides=metadata_overrides or None)
-    stt = build_stt(ai_config=ai_config, metadata_overrides=metadata_overrides or None)
-    tts = build_tts(ai_config=ai_config, metadata_overrides=metadata_overrides or None)
+    llm = build_llm(ai_config=ai_config)
+    stt = build_stt(ai_config=ai_config)
+    tts = build_tts(ai_config=ai_config)
 
     # Configure the voice processing pipeline optimized for telephony.
     # - STT-based turn detection avoids the Silero VAD inference delay on
@@ -326,6 +243,8 @@ async def entrypoint(ctx: JobContext):
     
     # Trigger outbound opener immediately
     opening_line = agent_config.get("opening_line") or "Start the call with your outbound opening line immediately. Speak confidently and naturally."
+    if business_name and "{business_name}" in opening_line:
+        opening_line = opening_line.format(business_name=business_name)
     await session.generate_reply(
         instructions=opening_line
     )

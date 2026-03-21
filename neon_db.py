@@ -372,6 +372,29 @@ class NeonDB:
             """, name)
             return dict(row) if row else None
 
+    async def update_ai_config(
+        self,
+        name: str = "default_telephony_config",
+        **kwargs: Any,
+    ) -> None:
+        """Update AI configuration fields by name.
+
+        Only the provided keyword arguments are updated; the rest are left
+        unchanged via COALESCE.  Supported keys mirror the ``ai_configs``
+        columns: ``llm_provider``, ``llm_model``, ``tts_provider``,
+        ``tts_language``, etc.
+        """
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE ai_configs
+                SET
+                    llm_provider   = COALESCE($2, llm_provider),
+                    tts_provider   = COALESCE($3, tts_provider),
+                    tts_language   = COALESCE($4, tts_language),
+                    updated_at     = NOW()
+                WHERE name = $1 AND is_active = true
+            """, name, kwargs.get("llm_provider"), kwargs.get("tts_provider"), kwargs.get("tts_language"))
+
 
 async def get_db() -> NeonDB:
     """Create a new database instance for each job."""

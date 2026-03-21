@@ -106,14 +106,13 @@ class PromptUpdateRequest(BaseModel):
     content: str
 
 class AgentConfigRequest(BaseModel):
-    company_name: str
+    company_name: str = ""
     agent_name: str = "Aisha"
     system_prompt: str = ""
     tts_provider: str = "cartesia"  # "cartesia" | "sarvam"
     language: str = "hinglish"     # "hinglish" | "english" | "hindi"
-
-# In-memory store for active agent config (survives between calls in the same process)
-_active_agent_config: dict = {}
+    llm_provider: str = ""
+    agent_slug: str = "default_roofing_agent"
 
 async def initiate_outbound_call(request: OutboundCallRequest):
     """
@@ -195,19 +194,60 @@ async def initiate_outbound_call(request: OutboundCallRequest):
 @app.post("/api/config")
 async def save_agent_config(request: AgentConfigRequest):
     """
-    Save agent configuration (company name, system prompt, TTS provider, language).
-    Stored in-memory as the active config; picked up by telephony_agent on next call.
+    Save agent configuration to the database (single source of truth).
+    The system_prompt is saved to the ``prompts`` table (with placeholder
+    substitution applied) and AI provider settings are saved to the
+    ``ai_configs`` table.
     """
-    global _active_agent_config
-    _active_agent_config = request.model_dump()
-    logger.info(f"Agent config updated: company={request.company_name}, tts={request.tts_provider}, lang={request.language}")
-    return {"status": "ok", "config": _active_agent_config}
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    agent_slug = request.agent_slug
+
+    # Persist system prompt to the prompts table
+    if request.system_prompt.strip():
+        # Apply placeholder substitution so the DB always stores the
+        # final prompt text — no runtime guessing required.
+        final_prompt = request.system_prompt
+        if request.company_name:
+            final_prompt = final_prompt.replace("{company_name}", request.company_name)
+        if request.agent_name:
+            final_prompt = final_prompt.replace("{agent_name}", request.agent_name)
+        await db_instance.update_active_prompt(agent_slug, final_prompt)
+
+    # Persist AI provider settings to the ai_configs table
+    await db_instance.update_ai_config(
+        name="default_telephony_config",
+        llm_provider=request.llm_provider or None,
+        tts_provider=request.tts_provider or None,
+        tts_language=request.language or None,
+    )
+
+    logger.info(
+        "Agent config saved to DB: slug=%s, tts=%s, lang=%s",
+        agent_slug, request.tts_provider, request.language,
+    )
+    return {"status": "ok", "message": "Configuration saved to database"}
 
 
 @app.get("/api/config")
 async def get_agent_config():
-    """Return the current active agent configuration."""
-    return _active_agent_config
+    """Return the current active agent configuration from the database."""
+    if not db_instance:
+        return {}
+
+    agent_slug = "default_roofing_agent"
+    prompt_content = await db_instance.get_active_prompt(agent_slug)
+    ai_config = await db_instance.get_ai_config("default_telephony_config")
+
+    return {
+        "system_prompt": prompt_content or "",
+        "tts_provider": (ai_config.get("tts_provider") or "openai") if ai_config else "openai",
+        "llm_provider": (ai_config.get("llm_provider") or "openai") if ai_config else "openai",
+        "language": (ai_config.get("tts_language") or "") if ai_config else "",
+        "company_name": "",
+        "agent_name": "",
+    }
 
 
 @app.post("/outbound-call")
