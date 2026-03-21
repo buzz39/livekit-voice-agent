@@ -28,6 +28,9 @@
 **/.env
 **/.env.*
 
+# Node modules
+**/node_modules/
+
 # VCS, editor, OS
 .git
 .gitignore
@@ -46,3 +49,6 @@ test/
 tests/
 eval/
 evals/
+
+# Runtime logs
+server_log.txt

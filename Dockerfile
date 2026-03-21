@@ -1,6 +1,6 @@
+# syntax=docker/dockerfile:1
 # This is an example Dockerfile that builds a minimal container for running LK Agents
 # For more information on the build process, see https://docs.livekit.io/agents/ops/deployment/builds/
-# syntax=docker/dockerfile:1
 
 # Use the official UV Python base image with Python 3.13 on Debian Bookworm
 # UV is a fast Python package manager that provides better performance than pip
@@ -48,14 +48,11 @@ RUN mkdir -p src
 # Ensure your uv.lock file is checked in for consistency across environments
 RUN uv sync --locked
 
-# Copy all remaining pplication files into the container
+# Copy all remaining application files into the container
 # This includes source code, configuration files, and dependency specifications
 # (Excludes files specified in .dockerignore)
-COPY . .
-
-# Change ownership of all app files to the non-privileged user
-# This ensures the application can read/write files as needed
-RUN chown -R appuser:appuser /app
+# Using --chown avoids a costly chown -R layer that duplicates the entire .venv
+COPY --chown=appuser:appuser . .
 
 # Switch to the non-privileged user for all subsequent operations
 # This improves security by not running as root

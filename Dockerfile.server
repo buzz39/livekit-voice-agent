@@ -1,5 +1,5 @@
-# Dockerfile for LiveKit Outbound API Server
 # syntax=docker/dockerfile:1
+# Dockerfile for LiveKit Outbound API Server
 
 ARG PYTHON_VERSION=3.13
 FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS base
@@ -26,18 +26,13 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy dependency files
+# Copy dependency files and install Python dependencies
 COPY pyproject.toml uv.lock ./
 RUN mkdir -p src
-
-# Install Python dependencies
 RUN uv sync --locked
 
-# Copy application
-COPY . .
-
-# Set permissions
-RUN chown -R appuser:appuser /app
+# Copy application with correct ownership (avoids a costly chown -R layer)
+COPY --chown=appuser:appuser . .
 
 # Switch to non-privileged user
 USER appuser
