@@ -47,3 +47,5 @@ Thumbs.db
 # Local DB
 local.db
 .vercel
+node_modules/
+frontend/dist/
