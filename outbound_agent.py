@@ -24,7 +24,7 @@ from neon_db import get_db
 # Import new modules
 from outbound.metadata import extract_metadata, get_required_fields
 from outbound.config import load_agent_config, prepare_instructions, load_ai_config
-from outbound.sip import dial_participant
+from outbound.sip import dial_participant, get_sip_identity
 from outbound.tools import create_tools
 from outbound.recording import start_recording
 from outbound.lifecycle import finalize_call as finalize_call_logic
@@ -443,8 +443,19 @@ async def _run_entrypoint(ctx: JobContext):
     shutdown_event = asyncio.Event()
 
     # Listen for disconnect explicitly to run finalize BEFORE the main wait finishes/crashes
+    # Only react to the SIP participant we actually dialled to avoid double-finalize
+    # when unexpected participants (e.g. from a duplicate SIP creation) disconnect.
+    expected_sip_identity = get_sip_identity(phone_number)
+
     @ctx.room.on("participant_disconnected")
     def on_participant_disconnected(participant: rtc.RemoteParticipant):
+        if participant.identity != expected_sip_identity:
+            logger.debug(
+                "Ignoring disconnect from unexpected participant %s (expected %s)",
+                participant.identity,
+                expected_sip_identity,
+            )
+            return
         logger.info(f"Participant {participant.identity} disconnected - triggering finalize")
         asyncio.create_task(finalize_call())
 

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from outbound.sip import dial_participant
+from outbound.sip import dial_participant, get_sip_identity
 
 # Ensure trunk ID is set so dial_participant doesn't early-return
 _SIP_ENV = {"LIVEKIT_OUTBOUND_TRUNK_ID": "trunk-test-123"}
@@ -103,3 +103,19 @@ async def test_dial_participant_falls_back_to_env_when_no_from_number():
     assert success is True
     request = ctx.api.sip.create_sip_participant.await_args.args[0]
     assert request.sip_number == "+12029787305"
+
+
+# ---------------------------------------------------------------------------
+# get_sip_identity tests
+# ---------------------------------------------------------------------------
+
+def test_get_sip_identity_strips_non_digits():
+    assert get_sip_identity("+15550000000") == "15550000000"
+
+
+def test_get_sip_identity_returns_raw_sip_uri():
+    assert get_sip_identity("sip:hello@example.com") == "sip:hello@example.com"
+
+
+def test_get_sip_identity_digits_only_input():
+    assert get_sip_identity("919096132265") == "919096132265"

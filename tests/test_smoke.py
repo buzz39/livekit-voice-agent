@@ -142,6 +142,26 @@ class TestOutboundCallValidation:
         assert body["data"]["from_number"] is None
 
 
+class TestServerNoSIPParticipantCreation:
+    """server.py must NOT create SIP participants — only the agent does."""
+
+    def test_no_create_sip_participant_import(self):
+        """CreateSIPParticipantRequest should not be imported in server.py."""
+        import server as srv
+        import inspect
+
+        source = inspect.getsource(srv)
+        assert "CreateSIPParticipantRequest" not in source
+
+    def test_no_sip_caller_identity(self):
+        """The 'sip-caller-' identity prefix should not appear in server.py."""
+        import server as srv
+        import inspect
+
+        source = inspect.getsource(srv)
+        assert "sip-caller-" not in source
+
+
 class TestDashboardEndpoints:
     """Dashboard read endpoints must be routed (not 404)."""
 
