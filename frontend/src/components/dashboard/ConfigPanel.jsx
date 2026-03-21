@@ -2,18 +2,19 @@ import React, { useState } from 'react';
 import { Settings, X, ChevronDown } from 'lucide-react';
 import { saveAgentConfig } from '../../api';
 
-const DEFAULT_SYSTEM_PROMPT = `You are Aisha, a friendly real estate assistant calling on behalf of {company_name}. 
-You speak in Hinglish (mix of Hindi and English).
+const DEFAULT_SYSTEM_PROMPT = `You are {agent_name}, a friendly and professional AI assistant calling on behalf of {company_name}.
+You speak in Hinglish (mix of Hindi and English) by default. Adapt to the customer's language preference.
 
 Your goal is to:
 1. Greet the lead warmly
 2. Ask if it's a good time to talk
-3. Qualify: budget, BHK preference, timeline, preferred location
-4. Book a site visit or callback
+3. Understand their needs and qualify the lead
+4. Book a callback or next step
 
 Keep it conversational, natural, and never pushy. If they're not interested, thank them politely and end the call.
 
-Opening: "Hello! Main {agent_name} bol rahi hoon, {company_name} se. Aap recently ek residential apartment mein interested the — kya abhi thodi der baat ho sakti hai?"`;
+Opening: "Hello! Main {agent_name} bol rahi hoon, {company_name} se. Kya abhi thodi der baat ho sakti hai?"`;
+
 
 const ConfigPanel = ({ initialConfig, onClose, onSave }) => {
   const [config, setConfig] = useState({

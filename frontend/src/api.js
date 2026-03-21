@@ -1,6 +1,7 @@
 // Frontend API Client
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://livekit-outbound-api.tinysaas.fun';
+const API_SECRET_KEY = import.meta.env.VITE_API_SECRET_KEY || '';
 export const apiEvents = new EventTarget();
 
 function emitApiError(message) {
@@ -9,6 +10,11 @@ function emitApiError(message) {
 
 // Helper to get Stack Auth session token
 async function getAuthHeaders() {
+  const headers = {};
+  // Add API key if configured
+  if (API_SECRET_KEY) {
+    headers['x-api-key'] = API_SECRET_KEY;
+  }
   try {
     // Stack Auth stores the app instance on window after initialization
     if (window.__stackClientApp) {
@@ -16,14 +22,14 @@ async function getAuthHeaders() {
       if (user) {
         const token = await user.getAuthJson();
         if (token?.accessToken) {
-          return { 'Authorization': `Bearer ${token.accessToken}` };
+          headers['Authorization'] = `Bearer ${token.accessToken}`;
         }
       }
     }
   } catch {
     // Silently fail — auth headers are optional until backend enforces them
   }
-  return {};
+  return headers;
 }
 
 async function apiFetch(path, options = {}) {

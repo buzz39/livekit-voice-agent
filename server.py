@@ -2,11 +2,13 @@ import os
 import json
 import re
 import logging
+import time
+from collections import defaultdict
 from typing import Optional
 from urllib.parse import urlparse
 from contextlib import asynccontextmanager
 import boto3
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 from livekit import api
@@ -14,6 +16,7 @@ from livekit.protocol.room import CreateRoomRequest
 from dotenv import load_dotenv
 from neon_db import get_db, NeonDB
 from audio_router import audio_router
+from config import OUTBOUND_AGENT_NAME
 
 # Load environment variables
 load_dotenv()
@@ -46,18 +49,55 @@ app = FastAPI(title="LiveKit Voice Agent Outbound API", lifespan=lifespan)
 
 app.include_router(audio_router)
 
+# CORS: restrict to configured frontend origins (comma-separated) or allow all in dev
+_cors_origins_raw = os.getenv("CORS_ALLOWED_ORIGINS", "")
+_cors_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()] if _cors_origins_raw else ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In production, set this to the specific frontend URL
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# --- API Key Authentication ---
+API_SECRET_KEY = os.getenv("API_SECRET_KEY", "")
+
+async def verify_api_key(request: Request):
+    """Verify API key from Authorization header or x-api-key header.
+    Skips auth if API_SECRET_KEY is not configured (dev mode)."""
+    if not API_SECRET_KEY:
+        return  # No key configured — dev mode, allow all
+    # Allow health endpoint without auth
+    if request.url.path == "/health":
+        return
+    key = request.headers.get("x-api-key") or ""
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        key = key or auth_header[7:]
+    if key != API_SECRET_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+# --- Simple Rate Limiter ---
+_RATE_LIMIT_WINDOW = 60  # seconds
+_RATE_LIMIT_MAX = int(os.getenv("RATE_LIMIT_MAX_CALLS_PER_MIN", "10"))
+_call_timestamps: dict[str, list[float]] = defaultdict(list)
+
+def _check_rate_limit(client_ip: str):
+    """Raise 429 if the client exceeds the outbound call rate limit."""
+    now = time.time()
+    timestamps = _call_timestamps[client_ip]
+    # Purge old entries
+    _call_timestamps[client_ip] = [t for t in timestamps if now - t < _RATE_LIMIT_WINDOW]
+    if len(_call_timestamps[client_ip]) >= _RATE_LIMIT_MAX:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again shortly.")
+    _call_timestamps[client_ip].append(now)
+
 # Configuration
 ROOM_NAME_PREFIX = "outbound-call-"
-SIP_TRUNK_ID = os.getenv("SIP_TRUNK_ID", "ST_nVvG7n8BpJd3") # Default from existing code
-SIP_FROM_NUMBER = os.getenv("SIP_FROM_NUMBER", "+12029787305") # Default from existing code
+SIP_TRUNK_ID = os.getenv("SIP_TRUNK_ID", "")
+SIP_FROM_NUMBER = os.getenv("SIP_FROM_NUMBER", "")
 API_BASE_URL = os.getenv("API_BASE_URL", "").rstrip("/")  # e.g. https://livekit-outbound-api.tinysaas.fun
 
 # E.164 pattern: starts with + and a non-zero country code digit, followed by 1–14 more
@@ -164,7 +204,7 @@ async def initiate_outbound_call(request: OutboundCallRequest):
             
             await lk.agent_dispatch.create_dispatch(
                 livekit_api.CreateAgentDispatchRequest(
-                    agent_name="voice-assistant",  # Must match agent_name in outbound_agent.py WorkerOptions
+                    agent_name=OUTBOUND_AGENT_NAME,
                     room=room_name,
                     metadata=dispatch_metadata
                 )
@@ -175,7 +215,7 @@ async def initiate_outbound_call(request: OutboundCallRequest):
             return
 
 
-@app.post("/api/config")
+@app.post("/api/config", dependencies=[Depends(verify_api_key)])
 async def save_agent_config(request: AgentConfigRequest):
     """
     Save agent configuration to the database (single source of truth).
@@ -237,8 +277,8 @@ async def get_agent_config():
     }
 
 
-@app.post("/outbound-call")
-async def trigger_outbound_call(request: OutboundCallRequest, background_tasks: BackgroundTasks):
+@app.post("/outbound-call", dependencies=[Depends(verify_api_key)])
+async def trigger_outbound_call(request: OutboundCallRequest, background_tasks: BackgroundTasks, req: Request):
     """
     Endpoint to trigger an outbound call.
     Returns immediately and processes call in background.
@@ -246,6 +286,10 @@ async def trigger_outbound_call(request: OutboundCallRequest, background_tasks: 
     # Basic validation
     if not request.phone_number:
         raise HTTPException(status_code=400, detail="Phone number is required")
+
+    # Rate limit by client IP
+    client_ip = req.client.host if req.client else "unknown"
+    _check_rate_limit(client_ip)
 
     logger.info(f"Received outbound call request for {request.phone_number} ({request.business_name})")
     
@@ -257,7 +301,7 @@ async def trigger_outbound_call(request: OutboundCallRequest, background_tasks: 
         "data": request.model_dump()
     }
 
-@app.get("/dashboard/stats")
+@app.get("/dashboard/stats", dependencies=[Depends(verify_api_key)])
 async def get_dashboard_stats():
     """Get dashboard statistics."""
     if not db_instance:
@@ -270,7 +314,7 @@ async def get_dashboard_stats():
         logger.error(f"Error fetching stats: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@app.get("/dashboard/analytics/volume")
+@app.get("/dashboard/analytics/volume", dependencies=[Depends(verify_api_key)])
 async def get_analytics_volume(days: int = 30):
     """Get daily call volume for analytics."""
     if not db_instance:
@@ -283,7 +327,7 @@ async def get_analytics_volume(days: int = 30):
         logger.error(f"Error fetching analytics volume: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@app.get("/dashboard/prompts")
+@app.get("/dashboard/prompts", dependencies=[Depends(verify_api_key)])
 async def get_all_prompts():
     """Get all available prompts."""
     if not db_instance:
@@ -296,7 +340,7 @@ async def get_all_prompts():
         logger.error(f"Error fetching prompts: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@app.get("/dashboard/prompt")
+@app.get("/dashboard/prompt", dependencies=[Depends(verify_api_key)])
 async def get_active_prompt(name: str = "default_roofing_agent"):
     """Get active prompt."""
     if not db_instance:
@@ -313,7 +357,7 @@ async def get_active_prompt(name: str = "default_roofing_agent"):
         logger.error(f"Error fetching prompt: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@app.post("/dashboard/prompt")
+@app.post("/dashboard/prompt", dependencies=[Depends(verify_api_key)])
 async def update_active_prompt(request: PromptUpdateRequest):
     """Update active prompt."""
     if not db_instance:
@@ -385,7 +429,7 @@ def generate_presigned_url(recording_url: str, expiration=3600) -> Optional[str]
         logger.error(f"Error generating presigned URL for {recording_url}: {e}")
         return recording_url
 
-@app.get("/dashboard/calls")
+@app.get("/dashboard/calls", dependencies=[Depends(verify_api_key)])
 async def get_dashboard_calls(limit: int = 10):
     """Get recent calls."""
     if not db_instance:
@@ -403,7 +447,7 @@ async def get_dashboard_calls(limit: int = 10):
         logger.error(f"Error fetching calls: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@app.get("/dashboard/call/{call_id}")
+@app.get("/dashboard/call/{call_id}", dependencies=[Depends(verify_api_key)])
 async def get_call_details(call_id: int):
     """Get details for a specific call, including transcript."""
     if not db_instance:
@@ -423,65 +467,13 @@ async def get_call_details(call_id: int):
         logger.error(f"Error fetching call {call_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@app.get("/dashboard/appointments")
+@app.get("/dashboard/appointments", dependencies=[Depends(verify_api_key)])
 async def get_appointments():
     """
     Get scheduled appointments/callbacks booked during AI calls.
-    Returns mock data for now — replace with real DB query when appointments table exists.
+    Returns empty list — appointments feature coming soon.
     """
-    from datetime import date, timedelta
-    today = date.today()
-    mock_appointments = [
-        {
-            "id": 1,
-            "lead_name": "Rajesh Sharma",
-            "phone": "+91-98201-12345",
-            "date": str(today),
-            "time": "10:00 AM",
-            "status": "confirmed"
-        },
-        {
-            "id": 2,
-            "lead_name": "Priya Mehta",
-            "phone": "+91-98765-43210",
-            "date": str(today),
-            "time": "2:30 PM",
-            "status": "pending"
-        },
-        {
-            "id": 3,
-            "lead_name": "Anil Kapoor",
-            "phone": "+91-90001-11111",
-            "date": str(today + timedelta(days=1)),
-            "time": "11:00 AM",
-            "status": "pending"
-        },
-        {
-            "id": 4,
-            "lead_name": "Sunita Verma",
-            "phone": "+91-77777-88888",
-            "date": str(today + timedelta(days=2)),
-            "time": "4:00 PM",
-            "status": "confirmed"
-        },
-        {
-            "id": 5,
-            "lead_name": "Deepak Joshi",
-            "phone": "+91-99999-00000",
-            "date": str(today - timedelta(days=1)),
-            "time": "9:00 AM",
-            "status": "done"
-        },
-        {
-            "id": 6,
-            "lead_name": "Kavita Singh",
-            "phone": "+91-88888-55555",
-            "date": str(today + timedelta(days=3)),
-            "time": "3:00 PM",
-            "status": "pending"
-        },
-    ]
-    return mock_appointments
+    return []
 
 
 @app.get("/health")

@@ -1,15 +1,4 @@
 import React from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-
-const data = [
-  { name: '10:00', value: 4000 },
-  { name: '10:05', value: 3000 },
-  { name: '10:10', value: 2000 },
-  { name: '10:15', value: 2780 },
-  { name: '10:20', value: 1890 },
-  { name: '10:25', value: 2390 },
-  { name: '10:30', value: 3490 },
-];
 
 const StatsCard = ({ title, value, subtext, chartColor = "#6366f1" }) => {
   return (
@@ -20,25 +9,15 @@ const StatsCard = ({ title, value, subtext, chartColor = "#6366f1" }) => {
         <div className="text-emerald-400 text-xs mt-1 font-medium">{subtext}</div>
       </div>
 
-      <div className="h-24 mt-4 -mx-2 w-full min-w-0">
-        <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-          <AreaChart data={data}>
-            <defs>
-              <linearGradient id={`color${title.replace(/\s/g, '')}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor={chartColor} stopOpacity={0.3} />
-                <stop offset="95%" stopColor={chartColor} stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <Area
-              type="monotone"
-              dataKey="value"
-              stroke={chartColor}
-              strokeWidth={2}
-              fillOpacity={1}
-              fill={`url(#color${title.replace(/\s/g, '')})`}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
+      <div className="h-6 mt-4 w-full min-w-0 flex items-end gap-[2px]">
+        {/* Simple decorative bar visualization using the accent color */}
+        {[0.4, 0.6, 0.35, 0.7, 0.5, 0.8, 0.65, 0.9, 0.55, 0.75].map((h, i) => (
+          <div
+            key={i}
+            className="flex-1 rounded-sm"
+            style={{ height: `${h * 100}%`, backgroundColor: chartColor, opacity: 0.3 + (i / 15) }}
+          />
+        ))}
       </div>
     </div>
   );

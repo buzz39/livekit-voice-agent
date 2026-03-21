@@ -4,8 +4,13 @@ import { StackProvider, StackTheme, StackClientApp } from '@stackframe/react'
 import './index.css'
 import App from './App.jsx'
 
+const stackProjectId = import.meta.env.VITE_STACK_PROJECT_ID;
+if (!stackProjectId) {
+  console.warn('VITE_STACK_PROJECT_ID is not set. Auth will not work until configured.');
+}
+
 const stackApp = new StackClientApp({
-  projectId: import.meta.env.VITE_STACK_PROJECT_ID || 'your_stack_project_id',
+  projectId: stackProjectId || 'placeholder',
   tokenStore: 'cookie',
   urls: {
     signIn: '/sign-in',

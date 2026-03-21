@@ -35,7 +35,7 @@ const ActiveCallPanel = ({ status, onStartCall, onEndCall }) => {
   const normalizedFromNumber = useMemo(() => normalizePhoneNumber(fromNumber.trim()), [fromNumber]);
   const hasPhoneNumber = normalizedPhoneNumber.length > 0;
   const phoneError = hasPhoneNumber && !isValidE164PhoneNumber(normalizedPhoneNumber)
-    ? 'Use international format, for example +14155552671.'
+    ? 'Use international format, for example +919876543210.'
     : '';
   const fromNumberError = normalizedFromNumber.length > 0 && !isValidE164PhoneNumber(normalizedFromNumber)
     ? 'Use international format, for example +911171366938.'
@@ -108,7 +108,7 @@ const ActiveCallPanel = ({ status, onStartCall, onEndCall }) => {
                 <label className="block text-xs font-medium text-slate-400 mb-1">To (Customer Number)</label>
                 <input
                   type="tel"
-                  placeholder="e.g. +14155552671"
+                  placeholder="e.g. +919876543210"
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   value={phoneNumber}
                   onChange={(e) => {

@@ -37,11 +37,11 @@ const LandingPage = () => {
         </div>
 
         <h1 className="text-5xl md:text-7xl font-bold leading-tight max-w-4xl mb-6 bg-gradient-to-br from-white to-slate-400 bg-clip-text text-transparent">
-          AI-powered outbound voice agents for real estate, insurance &amp; more
+          AI voice agents that call, qualify &amp; convert — in Hindi, English &amp; Hinglish
         </h1>
 
         <p className="text-slate-400 text-lg md:text-xl max-w-2xl mb-10">
-          Aisha AI makes hundreds of outbound calls a day, qualifies leads, books appointments, and reports back — so your team focuses only on hot prospects.
+          Aisha AI makes hundreds of outbound calls a day, qualifies leads in their language, books appointments, and reports back — so your team focuses only on hot prospects.
         </p>
 
         <div className="flex flex-col sm:flex-row gap-4">
@@ -66,7 +66,7 @@ const LandingPage = () => {
           <FeatureCard
             icon={<Phone className="w-6 h-6 text-indigo-400" />}
             title="Automated Outbound Calls"
-            description="Your AI agent calls leads, handles objections, and qualifies prospects 24/7 — without human intervention."
+            description="Your AI agent calls leads in Hindi, English, or Hinglish — handles objections and qualifies prospects 24/7."
           />
           <FeatureCard
             icon={<BarChart2 className="w-6 h-6 text-emerald-400" />}
@@ -75,15 +75,15 @@ const LandingPage = () => {
           />
           <FeatureCard
             icon={<Users className="w-6 h-6 text-amber-400" />}
-            title="Calendar Integration"
-            description="Aisha books appointments directly into your calendar during calls. No back-and-forth."
+            title="10+ Indian Languages"
+            description="Supports Hindi, Bengali, Tamil, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi, Odia and English."
           />
         </div>
       </div>
 
       {/* Footer */}
       <div className="border-t border-slate-800 py-8 text-center text-slate-500 text-sm">
-        © 2025 Aisha AI · Built for high-performers
+        © {new Date().getFullYear()} Aisha AI · Made for Indian businesses
       </div>
     </div>
   );
