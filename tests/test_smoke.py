@@ -134,6 +134,7 @@ class TestOutboundCallValidation:
             json={
                 "phone_number": "+14155552671",
                 "business_name": "Acme Roofing",
+                "agent_slug": "roofing_agent",
             },
         )
         assert resp.status_code == 200

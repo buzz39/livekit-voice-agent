@@ -130,15 +130,17 @@ async def initiate_outbound_call(request: OutboundCallRequest):
     room_name = f"{ROOM_NAME_PREFIX}{request.phone_number.replace('+', '')}"
 
     async with api.LiveKitAPI(url=lk_url, api_key=lk_key, api_secret=lk_secret) as lk:
-        # Create room with metadata
-        room_metadata_dict = {
-            "business_name": request.business_name,
+        # Build metadata dict shared by room and dispatch
+        call_metadata = {
             "phone_number": request.phone_number,
+            "business_name": request.business_name,
             "agent_slug": request.agent_slug,
         }
         if request.from_number:
-            room_metadata_dict["from_number"] = request.from_number
-        room_metadata = json.dumps(room_metadata_dict)
+            call_metadata["from_number"] = request.from_number
+
+        # Create room with metadata
+        room_metadata = json.dumps(call_metadata)
 
         try:
             await lk.room.create_room(
@@ -156,14 +158,7 @@ async def initiate_outbound_call(request: OutboundCallRequest):
         # Explicitly dispatch outbound_agent to the room
         try:
             from livekit import api as livekit_api
-            dispatch_metadata_dict = {
-                "phone_number": request.phone_number,
-                "business_name": request.business_name,
-                "agent_slug": request.agent_slug,
-            }
-            if request.from_number:
-                dispatch_metadata_dict["from_number"] = request.from_number
-            dispatch_metadata = json.dumps(dispatch_metadata_dict)
+            dispatch_metadata = json.dumps(call_metadata)
             
             await lk.agent_dispatch.create_dispatch(
                 livekit_api.CreateAgentDispatchRequest(
