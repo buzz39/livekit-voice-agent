@@ -12,6 +12,8 @@ from livekit.agents import (
     get_job_context,
 )
 from livekit.agents.voice.room_io import RoomInputOptions
+from livekit.agents.voice.events import ErrorEvent
+from livekit.agents.llm import LLMError
 from livekit.plugins import noise_cancellation
 from livekit import api
 from livekit import rtc
@@ -43,6 +45,8 @@ except ImportError:
 
 load_dotenv()
 logger = logging.getLogger("outbound-agent")
+
+LLM_ERROR_FALLBACK_MESSAGE = "Give me just a moment, I need to gather my thoughts."
 
 if not WHISPEY_ENABLED:
     logger.warning("Whispey not installed. Install with: pip install whispey")
@@ -264,6 +268,21 @@ async def _run_entrypoint(ctx: JobContext):
         min_endpointing_delay=0.07,
     )
 
+    # Handle LLM/TTS errors gracefully: speak a fallback message instead of
+    # going silent when the model fails (e.g. function-calling APIError).
+    @session.on("error")
+    def _on_session_error(ev: ErrorEvent):
+        error_obj = ev.error
+        is_llm = isinstance(error_obj, LLMError) or getattr(error_obj, "type", None) == "llm_error"
+        underlying = getattr(error_obj, "error", error_obj)
+        logger.error("Session error (llm=%s): %s", is_llm, underlying)
+
+        if is_llm:
+            call_metadata["notes"].append(f"LLM error: {underlying}")
+            try:
+                session.say(LLM_ERROR_FALLBACK_MESSAGE)
+            except Exception:
+                logger.warning("Failed to speak LLM error fallback message")
 
     # Start Whispey session tracking with metadata
     session_id = None
