@@ -81,6 +81,7 @@ class OutboundCallRequest(BaseModel):
     business_name: str
     agent_slug: str = "roofing_agent"
     provider: Optional[str] = None # 'twilio' or 'telnyx' or default/sip
+    from_number: Optional[str] = None  # Caller ID / FROM number in E.164 format
 
     @field_validator("phone_number")
     @classmethod
@@ -88,6 +89,15 @@ class OutboundCallRequest(BaseModel):
         if not _E164_RE.match(v):
             raise ValueError(
                 "phone_number must be in E.164 format (e.g. +14155552671)"
+            )
+        return v
+
+    @field_validator("from_number")
+    @classmethod
+    def validate_from_number(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and not _E164_RE.match(v):
+            raise ValueError(
+                "from_number must be in E.164 format (e.g. +14155552671)"
             )
         return v
 
@@ -120,12 +130,17 @@ async def initiate_outbound_call(request: OutboundCallRequest):
     room_name = f"{ROOM_NAME_PREFIX}{request.phone_number.replace('+', '')}"
 
     async with api.LiveKitAPI(url=lk_url, api_key=lk_key, api_secret=lk_secret) as lk:
-        # Create room with metadata
-        room_metadata = json.dumps({
-            "business_name": request.business_name,
+        # Build metadata dict shared by room and dispatch
+        call_metadata = {
             "phone_number": request.phone_number,
-            "agent_slug": request.agent_slug
-        })
+            "business_name": request.business_name,
+            "agent_slug": request.agent_slug,
+        }
+        if request.from_number:
+            call_metadata["from_number"] = request.from_number
+
+        # Create room with metadata
+        room_metadata = json.dumps(call_metadata)
 
         try:
             await lk.room.create_room(
@@ -143,11 +158,7 @@ async def initiate_outbound_call(request: OutboundCallRequest):
         # Explicitly dispatch outbound_agent to the room
         try:
             from livekit import api as livekit_api
-            dispatch_metadata = json.dumps({
-                "phone_number": request.phone_number,
-                "business_name": request.business_name,
-                "agent_slug": request.agent_slug
-            })
+            dispatch_metadata = json.dumps(call_metadata)
             
             await lk.agent_dispatch.create_dispatch(
                 livekit_api.CreateAgentDispatchRequest(
@@ -164,15 +175,17 @@ async def initiate_outbound_call(request: OutboundCallRequest):
         # Step 3: Create SIP participant — THIS actually dials the phone
         try:
             sip_trunk_id = os.getenv("LIVEKIT_OUTBOUND_TRUNK_ID", SIP_TRUNK_ID)
-            sip_participant = await lk.sip.create_sip_participant(
-                CreateSIPParticipantRequest(
-                    sip_trunk_id=sip_trunk_id,
-                    sip_call_to=request.phone_number,
-                    room_name=room_name,
-                    participant_name="caller",
-                    participant_identity=f"sip-caller-{request.phone_number.replace('+', '')}",
-                )
+            sip_from = request.from_number or os.getenv("SIP_FROM_NUMBER")
+            sip_request = CreateSIPParticipantRequest(
+                sip_trunk_id=sip_trunk_id,
+                sip_call_to=request.phone_number,
+                room_name=room_name,
+                participant_name="caller",
+                participant_identity=f"sip-caller-{request.phone_number.replace('+', '')}",
             )
+            if sip_from:
+                sip_request.sip_number = sip_from
+            sip_participant = await lk.sip.create_sip_participant(sip_request)
             logger.info(f"SIP participant created — phone dialed: {sip_participant.participant_identity}")
         except Exception as e:
             logger.error(f"Failed to create SIP participant (phone not dialed): {e}")

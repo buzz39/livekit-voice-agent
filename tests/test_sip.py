@@ -71,3 +71,35 @@ async def test_dial_participant_waits_for_join_after_successful_dial():
     request = ctx.api.sip.create_sip_participant.await_args.args[0]
     assert request.participant_identity == "sip:agent@test.local"
     assert request.sip_call_to == "agent"
+
+
+@pytest.mark.asyncio
+async def test_dial_participant_uses_from_number_override():
+    """When from_number is passed, it should be used as sip_number instead of env var."""
+    ctx = _make_ctx()
+    participant = SimpleNamespace(identity="15550000000")
+
+    env = {**_SIP_ENV, "SIP_FROM_NUMBER": "+12029787305"}
+    with patch.dict(os.environ, env, clear=False), \
+         patch("outbound.sip.wait_for_participant", new=AsyncMock(return_value=participant)):
+        success = await dial_participant(ctx, "+15550000000", "Test Biz", from_number="+911171366938")
+
+    assert success is True
+    request = ctx.api.sip.create_sip_participant.await_args.args[0]
+    assert request.sip_number == "+911171366938"
+
+
+@pytest.mark.asyncio
+async def test_dial_participant_falls_back_to_env_when_no_from_number():
+    """When from_number is None, it should fall back to SIP_FROM_NUMBER env var."""
+    ctx = _make_ctx()
+    participant = SimpleNamespace(identity="15550000000")
+
+    env = {**_SIP_ENV, "SIP_FROM_NUMBER": "+12029787305"}
+    with patch.dict(os.environ, env, clear=False), \
+         patch("outbound.sip.wait_for_participant", new=AsyncMock(return_value=participant)):
+        success = await dial_participant(ctx, "+15550000000", "Test Biz")
+
+    assert success is True
+    request = ctx.api.sip.create_sip_participant.await_args.args[0]
+    assert request.sip_number == "+12029787305"

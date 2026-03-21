@@ -9,7 +9,7 @@ from livekit.agents.utils.participant import wait_for_participant
 
 logger = logging.getLogger("outbound.sip")
 
-async def dial_participant(ctx, phone_number: str, business_name: str, dispatcher=None) -> bool:
+async def dial_participant(ctx, phone_number: str, business_name: str, dispatcher=None, from_number: Optional[str] = None) -> bool:
     """
     Dials a SIP participant.
 
@@ -18,13 +18,15 @@ async def dial_participant(ctx, phone_number: str, business_name: str, dispatche
         phone_number: The target phone number or SIP URI.
         business_name: The name to display for the caller.
         dispatcher: Optional WebhookDispatcher to report failures.
+        from_number: Optional caller ID / FROM number override. When provided,
+                     takes precedence over the SIP_FROM_NUMBER environment variable.
 
     Returns:
         True if the call was answered (or at least dialed successfully without immediate exception),
         False otherwise.
     """
     sip_trunk_id = os.getenv("LIVEKIT_OUTBOUND_TRUNK_ID") or os.getenv("SIP_TRUNK_ID")
-    sip_from_number = os.getenv("SIP_FROM_NUMBER")
+    sip_from_number = from_number or os.getenv("SIP_FROM_NUMBER")
 
     if not sip_trunk_id:
         logger.error("LIVEKIT_OUTBOUND_TRUNK_ID (or SIP_TRUNK_ID) not set in env")

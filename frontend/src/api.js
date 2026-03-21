@@ -156,15 +156,19 @@ export async function saveAgentConfig(config) {
   return await response.json();
 }
 
-export async function startOutboundCall(phoneNumber, businessName = "Default Business", agentSlug = "default_roofing_agent") {
+export async function startOutboundCall(phoneNumber, businessName = "Default Business", agentSlug = "default_roofing_agent", fromNumber = null) {
   try {
+    const body = {
+      phone_number: phoneNumber,
+      business_name: businessName,
+      agent_slug: agentSlug,
+    };
+    if (fromNumber) {
+      body.from_number = fromNumber;
+    }
     const response = await apiFetch('/outbound-call', {
       method: 'POST',
-      body: JSON.stringify({
-        phone_number: phoneNumber,
-        business_name: businessName,
-        agent_slug: agentSlug,
-      }),
+      body: JSON.stringify(body),
     });
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     return await response.json();

@@ -137,15 +137,15 @@ function Dashboard() {
     }
   }, [callStatus]);
 
-  const handleStartCall = async (number, businessName, agentSlug) => {
+  const handleStartCall = async (number, businessName, agentSlug, fromNumber) => {
     setCallStatus('connecting');
     setLogs([{
       role: 'system',
-      text: `Initiating call to ${number}...`,
+      text: `Initiating call to ${number}${fromNumber ? ` from ${fromNumber}` : ''}...`,
       timestamp: new Date().toLocaleTimeString([], { hour12: false })
     }]);
     try {
-      await startOutboundCall(number, businessName, agentSlug);
+      await startOutboundCall(number, businessName, agentSlug, fromNumber);
       setTimeout(() => setCallStatus('active'), 2000);
       setLogs(prev => [...prev, {
         role: 'system',

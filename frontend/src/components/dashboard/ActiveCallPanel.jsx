@@ -12,6 +12,7 @@ const isValidE164PhoneNumber = (value) => /^\+[1-9]\d{7,14}$/.test(value);
 
 const ActiveCallPanel = ({ status, onStartCall, onEndCall }) => {
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [fromNumber, setFromNumber] = useState('');
   const [showConfig, setShowConfig] = useState(false);
   const [agentConfig, setAgentConfig] = useState(() => {
     if (typeof window === 'undefined') {
@@ -31,9 +32,13 @@ const ActiveCallPanel = ({ status, onStartCall, onEndCall }) => {
   const isCallActive = status === 'active';
   const isConnecting = status === 'connecting';
   const normalizedPhoneNumber = useMemo(() => normalizePhoneNumber(phoneNumber.trim()), [phoneNumber]);
+  const normalizedFromNumber = useMemo(() => normalizePhoneNumber(fromNumber.trim()), [fromNumber]);
   const hasPhoneNumber = normalizedPhoneNumber.length > 0;
   const phoneError = hasPhoneNumber && !isValidE164PhoneNumber(normalizedPhoneNumber)
     ? 'Use international format, for example +14155552671.'
+    : '';
+  const fromNumberError = normalizedFromNumber.length > 0 && !isValidE164PhoneNumber(normalizedFromNumber)
+    ? 'Use international format, for example +911171366938.'
     : '';
 
   const handleConfigSaved = (config) => {
@@ -46,7 +51,7 @@ const ActiveCallPanel = ({ status, onStartCall, onEndCall }) => {
   };
 
   const handleStartCall = async () => {
-    if (!hasPhoneNumber || phoneError) return;
+    if (!hasPhoneNumber || phoneError || fromNumberError) return;
 
     setCallError('');
 
@@ -58,7 +63,8 @@ const ActiveCallPanel = ({ status, onStartCall, onEndCall }) => {
       await onStartCall(
         normalizedPhoneNumber,
         agentConfig?.company_name || '',
-        agentConfig?.agent_slug || DEFAULT_AGENT_SLUG
+        agentConfig?.agent_slug || DEFAULT_AGENT_SLUG,
+        normalizedFromNumber || null
       );
     } catch (error) {
       setCallError(error?.message || 'Unable to start the call right now.');
@@ -98,24 +104,47 @@ const ActiveCallPanel = ({ status, onStartCall, onEndCall }) => {
             </div>
           ) : (
             <div className="w-full space-y-3">
-              <input
-                type="tel"
-                placeholder="e.g. +14155552671"
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                value={phoneNumber}
-                onChange={(e) => {
-                  setPhoneNumber(e.target.value);
-                  setCallError('');
-                }}
-              />
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">To (Customer Number)</label>
+                <input
+                  type="tel"
+                  placeholder="e.g. +14155552671"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  value={phoneNumber}
+                  onChange={(e) => {
+                    setPhoneNumber(e.target.value);
+                    setCallError('');
+                  }}
+                />
+                {phoneError && (
+                  <div className="mt-1 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+                    {phoneError}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">From (Caller ID) — optional</label>
+                <input
+                  type="tel"
+                  placeholder="e.g. +911171366938"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  value={fromNumber}
+                  onChange={(e) => {
+                    setFromNumber(e.target.value);
+                    setCallError('');
+                  }}
+                />
+                {fromNumberError && (
+                  <div className="mt-1 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+                    {fromNumberError}
+                  </div>
+                )}
+              </div>
+
               <p className="text-xs text-slate-500">
-                Enter the customer number in E.164 format so the call can be routed correctly.
+                <strong>To</strong> is the customer number to dial. <strong>From</strong> is the caller ID shown to the recipient — leave blank to use the server default.
               </p>
-              {phoneError && (
-                <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
-                  {phoneError}
-                </div>
-              )}
 
               {agentConfig && (
                 <div className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm">
@@ -165,7 +194,7 @@ const ActiveCallPanel = ({ status, onStartCall, onEndCall }) => {
               <button
                 onClick={handleStartCall}
                 className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={!hasPhoneNumber || Boolean(phoneError) || isConnecting}
+                disabled={!hasPhoneNumber || Boolean(phoneError) || Boolean(fromNumberError) || isConnecting}
               >
                 <Phone size={18} />
                 {isConnecting ? 'Connecting...' : 'Start Outbound Call'}

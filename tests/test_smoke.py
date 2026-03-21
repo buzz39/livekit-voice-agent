@@ -99,6 +99,48 @@ class TestOutboundCallValidation:
         )
         assert resp.status_code == 200
 
+    def test_valid_from_number_accepted(self, client):
+        """A request with a valid from_number should be accepted."""
+        resp = client.post(
+            "/outbound-call",
+            json={
+                "phone_number": "+14155552671",
+                "business_name": "Acme Roofing",
+                "agent_slug": "roofing_agent",
+                "from_number": "+911171366938",
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["data"]["from_number"] == "+911171366938"
+
+    def test_invalid_from_number_returns_422(self, client):
+        """An invalid from_number should be rejected."""
+        resp = client.post(
+            "/outbound-call",
+            json={
+                "phone_number": "+14155552671",
+                "business_name": "Acme Roofing",
+                "agent_slug": "roofing_agent",
+                "from_number": "not-a-number",
+            },
+        )
+        assert resp.status_code == 422
+
+    def test_null_from_number_accepted(self, client):
+        """Omitting from_number should be fine (backward compatible)."""
+        resp = client.post(
+            "/outbound-call",
+            json={
+                "phone_number": "+14155552671",
+                "business_name": "Acme Roofing",
+                "agent_slug": "roofing_agent",
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["data"]["from_number"] is None
+
 
 class TestDashboardEndpoints:
     """Dashboard read endpoints must be routed (not 404)."""

@@ -73,9 +73,12 @@ async def _run_entrypoint(ctx: JobContext):
     # 2. Extract outbound metadata (robust)
     initial_metadata = extract_metadata(ctx)
     phone_number, business_name, agent_slug = get_required_fields(initial_metadata)
+    from_number = initial_metadata.get("from_number")
     call_metadata["business_name"] = business_name
 
     logger.info(f"Parsed metadata → phone: {phone_number}, business: {business_name}, slug: {agent_slug}")
+    if from_number:
+        logger.info(f"Using caller ID (from_number): {from_number}")
 
     if not phone_number:
         logger.error("No phone number found in metadata. Cannot place outbound call.")
@@ -337,7 +340,7 @@ async def _run_entrypoint(ctx: JobContext):
 
     # 6. Dial the user (SIP)
     # This function handles the dialing and basic error reporting
-    dial_success = await dial_participant(ctx, phone_number, business_name, dispatcher)
+    dial_success = await dial_participant(ctx, phone_number, business_name, dispatcher, from_number=from_number)
     if not dial_success:
         logger.warning("SIP dial failed for %s — marking call %s as failed", phone_number, call_metadata.get("call_id"))
         call_id = call_metadata.get("call_id")
