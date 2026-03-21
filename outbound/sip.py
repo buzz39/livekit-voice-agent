@@ -9,6 +9,18 @@ from livekit.agents.utils.participant import wait_for_participant
 
 logger = logging.getLogger("outbound.sip")
 
+
+def get_sip_identity(phone_number: str) -> str:
+    """Return the participant identity that ``dial_participant`` will assign.
+
+    For regular phone numbers the identity is digits-only; for SIP URIs it
+    is the raw URI string.
+    """
+    if "sip:" in phone_number:
+        return phone_number
+    return re.sub(r"\D", "", phone_number)
+
+
 async def dial_participant(ctx, phone_number: str, business_name: str, dispatcher=None, from_number: Optional[str] = None) -> bool:
     """
     Dials a SIP participant.

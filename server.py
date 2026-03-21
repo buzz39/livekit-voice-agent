@@ -10,7 +10,6 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 from livekit import api
-from livekit.protocol.sip import CreateSIPParticipantRequest
 from livekit.protocol.room import CreateRoomRequest
 from dotenv import load_dotenv
 from neon_db import get_db, NeonDB
@@ -154,7 +153,11 @@ async def initiate_outbound_call(request: OutboundCallRequest):
         except Exception as e:
             logger.warning(f"Room creation ignored (likely exists): {e}")
 
-        # Explicitly dispatch outbound_agent to the room
+        # Explicitly dispatch outbound_agent to the room.
+        # The agent itself handles SIP dialing via outbound/sip.py so we
+        # must NOT create a SIP participant here — doing so would place a
+        # duplicate phone call and leave the agent unresponsive after its
+        # opening line.
         try:
             from livekit import api as livekit_api
             dispatch_metadata = json.dumps(call_metadata)
@@ -169,25 +172,6 @@ async def initiate_outbound_call(request: OutboundCallRequest):
             logger.info(f"Agent dispatch created for {room_name}")
         except Exception as e:
             logger.error(f"Failed to dispatch agent: {e}")
-            return
-
-        # Step 3: Create SIP participant — THIS actually dials the phone
-        try:
-            sip_trunk_id = os.getenv("LIVEKIT_OUTBOUND_TRUNK_ID", SIP_TRUNK_ID)
-            sip_from = request.from_number or os.getenv("SIP_FROM_NUMBER")
-            sip_request = CreateSIPParticipantRequest(
-                sip_trunk_id=sip_trunk_id,
-                sip_call_to=request.phone_number,
-                room_name=room_name,
-                participant_name="caller",
-                participant_identity=f"sip-caller-{request.phone_number.replace('+', '')}",
-            )
-            if sip_from:
-                sip_request.sip_number = sip_from
-            sip_participant = await lk.sip.create_sip_participant(sip_request)
-            logger.info(f"SIP participant created — phone dialed: {sip_participant.participant_identity}")
-        except Exception as e:
-            logger.error(f"Failed to create SIP participant (phone not dialed): {e}")
             return
 
 
