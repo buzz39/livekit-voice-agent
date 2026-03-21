@@ -26,8 +26,9 @@ from livekit.agents import (
     cli,
     get_job_context,
 )
-from livekit.agents.llm import function_tool
+from livekit.agents.llm import function_tool, LLMError
 from livekit.agents.voice.room_io import RoomInputOptions
+from livekit.agents.voice.events import ErrorEvent
 from livekit.plugins import noise_cancellation
 from livekit import api
 from mcp_integration import load_mcp_tools
@@ -105,7 +106,7 @@ async def entrypoint(ctx: JobContext):
 
     @function_tool
     async def end_call() -> str:
-        """End the call. Use this SILENTLY after saying goodbye - do not announce that you're ending the call."""
+        """End the current phone call. Call this after you have said goodbye to the user."""
         logger.info("Agent ending call...")
         await hangup_call()
         return ""
@@ -294,7 +295,23 @@ async def entrypoint(ctx: JobContext):
         llm=llm,
         tts=tts,
     )
-    
+
+    # Handle LLM/TTS errors gracefully: speak a fallback message instead of
+    # going silent when the model fails (e.g. function-calling APIError).
+    @session.on("error")
+    def _on_session_error(ev: ErrorEvent):
+        error_obj = ev.error
+        is_llm = isinstance(error_obj, LLMError) or getattr(error_obj, "type", None) == "llm_error"
+        underlying = getattr(error_obj, "error", error_obj)
+        logger.error("Session error (llm=%s): %s", is_llm, underlying)
+
+        if is_llm:
+            call_metadata["notes"].append(f"LLM error: {underlying}")
+            try:
+                session.say("Give me just a moment, I need to gather my thoughts.")
+            except Exception:
+                logger.warning("Failed to speak LLM error fallback message")
+
     # Start the agent session with telephony-optimized noise cancellation
     call_start_time = datetime.datetime.now()
     await session.start(
