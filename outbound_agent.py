@@ -15,7 +15,8 @@ from livekit.agents import (
 from livekit.agents.voice.room_io import RoomInputOptions
 from livekit.agents.voice.events import ErrorEvent
 from livekit.agents.llm import LLMError
-from livekit.plugins import noise_cancellation, silero, turn_detector
+from livekit.plugins import noise_cancellation, silero
+from livekit.plugins.turn_detector.multilingual import MultilingualModel
 from livekit import api
 from livekit import rtc
 
@@ -266,7 +267,7 @@ async def _run_entrypoint(ctx: JobContext):
     # to reduce perceived latency.  min_interruption_words=3 prevents
     # background noise from cutting off agent speech.
     session = AgentSession(
-        turn_detection=turn_detector.multilingual.MultilingualModel(),
+        turn_detection=MultilingualModel(),
         stt=stt,
         llm=llm,
         tts=tts,
