@@ -59,9 +59,8 @@ COPY --chown=appuser:appuser . .
 USER appuser
 
 # Pre-download any ML models or files the agent needs
-# This ensures the container is ready to run immediately without downloading
-# dependencies at runtime, which improves startup time and reliability
-RUN uv run python outbound_agent.py download-files
+# Not needed when using turn_detection="stt" (no local ONNX model required)
+# RUN uv run python outbound_agent.py download-files
 
 # Run the application using UV
 # UV will activate the virtual environment and run the agent.

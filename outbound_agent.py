@@ -16,7 +16,6 @@ from livekit.agents.voice.room_io import RoomInputOptions
 from livekit.agents.voice.events import ErrorEvent
 from livekit.agents.llm import LLMError
 from livekit.plugins import noise_cancellation, silero
-from livekit.plugins.turn_detector.multilingual import MultilingualModel
 from livekit import api
 from livekit import rtc
 
@@ -261,13 +260,13 @@ async def _run_entrypoint(ctx: JobContext):
             logger.warning("call.failed webhook error during provider initialization: %s", dispatch_error)
         return
 
-    # Multilingual turn detector for semantic end-of-turn detection,
-    # paired with Silero VAD for responsive interruption handling.
-    # preemptive_generation starts LLM+TTS before turn is fully committed
-    # to reduce perceived latency.  min_interruption_words=3 prevents
-    # background noise from cutting off agent speech.
+    # STT-based turn detection paired with Silero VAD for responsive
+    # interruption handling.  preemptive_generation starts LLM+TTS before
+    # turn is fully committed to reduce perceived latency.
+    # min_interruption_words=3 prevents background noise from cutting off
+    # agent speech.
     session = AgentSession(
-        turn_detection=MultilingualModel(),
+        turn_detection="stt",
         stt=stt,
         llm=llm,
         tts=tts,
@@ -525,6 +524,5 @@ if __name__ == "__main__":
         WorkerOptions(
             entrypoint_fnc=entrypoint,
             agent_name="voice-assistant",
-            initialize_process_timeout=90.0,  # MultilingualModel ONNX load needs more than default 10s
         )
     )
