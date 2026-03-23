@@ -266,7 +266,7 @@ async def _run_entrypoint(ctx: JobContext):
     # to reduce perceived latency.  min_interruption_words=3 prevents
     # background noise from cutting off agent speech.
     session = AgentSession(
-        turn_detection=turn_detector.MultilingualModel(),
+        turn_detection=turn_detector.multilingual.MultilingualModel(),
         stt=stt,
         llm=llm,
         tts=tts,
