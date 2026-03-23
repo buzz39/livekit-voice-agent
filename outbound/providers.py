@@ -10,11 +10,15 @@ from outbound.sarvam_tts import (
     SARVAM_DEFAULT_MODEL,
     SARVAM_DEFAULT_VOICE,
     SARVAM_SAMPLE_RATE,
+    SarvamTTS,
     VALID_SARVAM_SPEAKERS,
     normalize_sarvam_language,
     normalize_sarvam_model,
     normalize_sarvam_speaker,
 )
+
+VALID_SARVAM_STT_MODELS = {"saarika:v2", "saarika:v2.5", "saaras:v3"}
+DEFAULT_SARVAM_STT_MODEL = "saarika:v2.5"
 
 logger = logging.getLogger("outbound.providers")
 
@@ -212,9 +216,10 @@ def build_stt(ai_config: Dict[str, Any], metadata_overrides: Optional[Dict[str, 
 
     if provider == "sarvam":
         sarvam_lang = normalize_sarvam_language(language)
-        logger.info(f"Using Sarvam STT: {model or 'saarika:v2'}/{sarvam_lang}")
+        stt_model = model if model and model in VALID_SARVAM_STT_MODELS else DEFAULT_SARVAM_STT_MODEL
+        logger.info(f"Using Sarvam STT: {stt_model}/{sarvam_lang}")
         return sarvam.STT(
-            model=model if model and model not in ("nova-3", "nova-2") else "saarika:v2",
+            model=stt_model,
             language_code=sarvam_lang,
         )
 
@@ -242,12 +247,12 @@ def build_tts(ai_config: Dict[str, Any], metadata_overrides: Optional[Dict[str, 
         return inworld.TTS(voice=voice)
 
     if provider == "sarvam":
-        logger.info(f"Using Sarvam TTS (official plugin): {model}/{voice}/{language}")
-        return sarvam.TTS(
+        logger.info(f"Using Sarvam TTS (custom streaming): {model}/{voice}/{language}")
+        return SarvamTTS(
+            voice=voice,
+            language=language,
             model=model,
-            speaker=voice,
-            target_language_code=language,
-            speech_sample_rate=SARVAM_SAMPLE_RATE,
+            sample_rate=SARVAM_SAMPLE_RATE,
         )
 
     logger.info(f"Using OpenAI TTS: {model}/{voice}")

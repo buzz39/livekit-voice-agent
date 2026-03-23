@@ -152,15 +152,15 @@ def test_build_tts_returns_sarvam_tts_instance():
     with patch.dict("os.environ", {"SARVAM_API_KEY": "test-key", "OPENAI_API_KEY": "test-openai", "DEEPGRAM_API_KEY": "test-deepgram"}, clear=True):
         tts = build_tts(ai_config=ai_config)
 
-    from livekit.plugins import sarvam
-    assert isinstance(tts, sarvam.TTS)
-    assert tts._opts.speaker == "simran"
-    assert str(tts._opts.target_language_code) == "hi-IN"
-    assert tts._opts.model == "bulbul:v3"
+    from outbound.sarvam_tts import SarvamTTS
+    assert isinstance(tts, SarvamTTS)
+    assert tts._voice == "simran"
+    assert tts._language == "hi-IN"
+    assert tts._model == "bulbul:v3"
 
 
 def test_resolve_ai_configuration_normalizes_legacy_sarvam_values():
-    ai_config = {"tts_provider": "sarvam", "tts_voice": "anushka", "tts_model": "tts-1"}
+    ai_config = {"tts_provider": "sarvam", "tts_voice": "nonexistent_voice", "tts_model": "tts-1"}
 
     with patch.dict("os.environ", {"SARVAM_API_KEY": "test-key", "OPENAI_API_KEY": "test-openai", "DEEPGRAM_API_KEY": "test-deepgram"}, clear=True):
         resolved = resolve_ai_configuration(ai_config=ai_config)

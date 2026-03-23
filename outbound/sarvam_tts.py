@@ -72,6 +72,7 @@ VALID_SARVAM_SPEAKERS = {
     "aayan",
     "advait",
     "amelia",
+    "anushka",
     "ashutosh",
     "dev",
     "gokul",
