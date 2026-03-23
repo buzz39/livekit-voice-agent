@@ -133,7 +133,7 @@ class TestTurnDetection:
 
     def test_outbound_agent_stt_turn_detection(self):
         src = self._source("outbound_agent.py")
-        assert 'turn_detection="stt"' in src
+        assert 'MultilingualModel()' in src
 
     def test_telephony_agent_stt_turn_detection(self):
         src = self._source("telephony_agent.py")
