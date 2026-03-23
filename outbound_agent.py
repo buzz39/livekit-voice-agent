@@ -282,7 +282,10 @@ async def _run_entrypoint(ctx: JobContext):
 
     @session.on("metrics_collected")
     def _on_metrics(mets: metrics.AgentMetrics):
-        metrics.log_metrics(mets)
+        try:
+            metrics.log_metrics(mets)
+        except AttributeError:
+            pass  # SDK 1.2.18 bug: MetricsCollectedEvent missing .metadata
         usage_collector.collect(mets)
 
     # Handle LLM/TTS errors gracefully: speak a fallback message instead of
