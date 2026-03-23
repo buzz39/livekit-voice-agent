@@ -525,5 +525,6 @@ if __name__ == "__main__":
         WorkerOptions(
             entrypoint_fnc=entrypoint,
             agent_name="voice-assistant",
+            initialize_process_timeout=90.0,  # MultilingualModel ONNX load needs more than default 10s
         )
     )
