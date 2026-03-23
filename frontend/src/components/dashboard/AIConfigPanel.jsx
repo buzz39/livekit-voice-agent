@@ -3,10 +3,10 @@ import {
   Plus, Save, Trash2, Cpu, ChevronDown, X,
   CheckCircle, AlertCircle,
 } from 'lucide-react';
-import { getAllAiConfigs, upsertAiConfig } from '../../api';
+import { getAllAiConfigs, upsertAiConfig, deleteAiConfig } from '../../api';
 
 const LLM_PROVIDERS = ['openai', 'groq'];
-const STT_PROVIDERS = ['deepgram'];
+const STT_PROVIDERS = ['deepgram', 'sarvam'];
 const TTS_PROVIDERS = ['openai', 'cartesia', 'deepgram', 'sarvam'];
 
 const defaultForm = {
@@ -58,6 +58,16 @@ export default function AIConfigPanel() {
     } catch { showToast('Failed to save', 'error'); }
   };
 
+  const handleDelete = async (name) => {
+    if (!window.confirm(`Delete AI config "${name}"?`)) return;
+    try {
+      await deleteAiConfig(name);
+      showToast('AI config deleted');
+      if (selected === name) { setSelected(null); setShowForm(false); }
+      load();
+    } catch { showToast('Failed to delete', 'error'); }
+  };
+
   const f = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
 
   return (
@@ -92,9 +102,15 @@ export default function AIConfigPanel() {
                     <Cpu size={14} className="text-cyan-400" />
                     <span className="text-sm font-semibold text-white">{c.name}</span>
                   </div>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${c.is_active ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
-                    {c.is_active ? 'active' : 'inactive'}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${c.is_active ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
+                      {c.is_active ? 'active' : 'inactive'}
+                    </span>
+                    <button onClick={(e) => { e.stopPropagation(); handleDelete(c.name); }}
+                      className="p-1 rounded hover:bg-slate-700 text-slate-500 hover:text-red-400">
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
                 </div>
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                   <Badge label={`LLM: ${c.llm_provider}/${c.llm_model}`} color="indigo" />

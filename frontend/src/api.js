@@ -340,6 +340,12 @@ export async function upsertAiConfig(config) {
   return await response.json();
 }
 
+export async function deleteAiConfig(name) {
+  const response = await apiFetch(`/dashboard/ai-config/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  if (!response.ok) throw new Error('Failed to delete AI config');
+  return await response.json();
+}
+
 // --- Objection CRUD ---
 
 export async function getObjections(agentSlug = null) {

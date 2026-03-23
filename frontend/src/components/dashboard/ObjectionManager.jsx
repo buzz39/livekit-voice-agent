@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Plus, Trash2, Shield, ChevronDown, X, Save,
+  Plus, Trash2, Shield, ChevronDown, X, Pencil,
   CheckCircle, AlertCircle,
 } from 'lucide-react';
 import { getObjections, upsertObjection, deleteObjection, getAgents } from '../../api';
@@ -123,7 +123,7 @@ export default function ObjectionManager() {
                 </div>
                 <div className="flex gap-1 flex-shrink-0">
                   <button onClick={() => handleEdit(obj)} className="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-indigo-400">
-                    <Save size={13} />
+                    <Pencil size={13} />
                   </button>
                   <button onClick={() => handleDelete(obj.id)} className="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-red-400">
                     <Trash2 size={13} />

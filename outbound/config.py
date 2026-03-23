@@ -49,17 +49,19 @@ async def prepare_instructions(db: Any, agent_slug: str, schema_fields: Any, age
         schema_prompt += "\nUse the `update_call_data` tool to save these values."
         agent_instructions += schema_prompt
 
-    # Inject objection handlers from DB
+    # --- Objection Handling Injection ---
     try:
         objections = await db.get_all_objections(agent_slug=agent_slug)
         if objections:
-            objection_prompt = "\n\nOBJECTION HANDLING - When you hear these objections, respond as follows:\n"
+            agent_instructions += "\n\n## Objection Handling\n"
+            agent_instructions += "When the caller raises these objections, respond as specified:\n"
             for obj in objections:
-                if obj.get("response_text"):
-                    objection_prompt += f'- If they say "{obj["objection_text"]}", respond: {obj["response_text"]}\n'
-            agent_instructions += objection_prompt
+                trigger = obj.get("objection_text", "")
+                response = obj.get("response_text", "")
+                if trigger and response:
+                    agent_instructions += f'- If they say "{trigger}": {response}\n'
     except Exception as e:
-        logger.debug(f"Could not load objections: {e}")
+        logger.warning(f"Failed to load objections for {agent_slug}: {e}")
 
     # Add required behavioral instructions
     additional_instructions = """

@@ -647,6 +647,19 @@ async def upsert_ai_config_endpoint(request: AIConfigUpsertRequest):
         logger.error(f"Error upserting AI config: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+@app.delete("/dashboard/ai-config/{name}", dependencies=[Depends(verify_api_key)])
+async def delete_ai_config(name: str):
+    """Delete an AI configuration by name."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        async with db_instance.pool.acquire() as conn:
+            await conn.execute("DELETE FROM ai_configs WHERE name = $1", name)
+        return {"status": "deleted"}
+    except Exception as e:
+        logger.error(f"Error deleting AI config {name}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 # --- Objection endpoints ---
 
 class ObjectionUpsertRequest(BaseModel):
