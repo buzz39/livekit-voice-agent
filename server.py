@@ -144,6 +144,58 @@ class PromptUpdateRequest(BaseModel):
     name: str = "roofing_agent"
     content: str
 
+class PromptCreateRequest(BaseModel):
+    name: str
+    content: str
+    industry: str = "general"
+    description: str = ""
+    is_active: bool = True
+
+class PromptPatchRequest(BaseModel):
+    name: Optional[str] = None
+    content: Optional[str] = None
+    industry: Optional[str] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class PromptCloneRequest(BaseModel):
+    new_name: str
+    new_industry: str
+
+class AgentConfigUpsertRequest(BaseModel):
+    slug: str
+    owner_id: str = ""
+    opening_line: str = ""
+    mcp_endpoint_url: str = ""
+    is_active: bool = True
+
+class DataSchemaFieldRequest(BaseModel):
+    slug: str
+    field_name: str
+    field_type: str = "string"
+    description: str = ""
+
+class TestCallRequest(BaseModel):
+    phone_number: str
+    business_name: str = ""
+    prompt_id: int
+    agent_slug: str = "default_roofing_agent"
+    from_number: Optional[str] = None
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone_number(cls, v: str) -> str:
+        if not _E164_RE.match(v):
+            raise ValueError("phone_number must be in E.164 format")
+        return v
+
+    @field_validator("from_number")
+    @classmethod
+    def validate_from_number(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and not _E164_RE.match(v):
+            raise ValueError("from_number must be in E.164 format")
+        return v
+
 class AgentConfigRequest(BaseModel):
     company_name: str = ""
     agent_name: str = "Aisha"
@@ -328,17 +380,232 @@ async def get_analytics_volume(days: int = 30):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/dashboard/prompts", dependencies=[Depends(verify_api_key)])
-async def get_all_prompts():
-    """Get all available prompts."""
+async def get_all_prompts(industry: Optional[str] = None):
+    """Get all available prompts, optionally filtered by industry."""
     if not db_instance:
         raise HTTPException(status_code=503, detail="Database not available")
 
     try:
-        prompts = await db_instance.get_all_prompts()
+        prompts = await db_instance.get_all_prompts(industry=industry)
         return prompts
     except Exception as e:
         logger.error(f"Error fetching prompts: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/dashboard/industries", dependencies=[Depends(verify_api_key)])
+async def get_industries():
+    """Get all distinct industry values."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        return await db_instance.get_industries()
+    except Exception as e:
+        logger.error(f"Error fetching industries: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/dashboard/prompts", dependencies=[Depends(verify_api_key)])
+async def create_prompt(request: PromptCreateRequest):
+    """Create a new prompt."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        prompt_id = await db_instance.create_prompt(
+            name=request.name,
+            content=request.content,
+            industry=request.industry,
+            description=request.description,
+            is_active=request.is_active,
+        )
+        return {"status": "created", "id": prompt_id}
+    except Exception as e:
+        logger.error(f"Error creating prompt: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/dashboard/prompt/{prompt_id}", dependencies=[Depends(verify_api_key)])
+async def get_prompt_by_id(prompt_id: int):
+    """Get a single prompt by ID with full content."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        prompt = await db_instance.get_prompt_by_id(prompt_id)
+        if not prompt:
+            raise HTTPException(status_code=404, detail="Prompt not found")
+        return prompt
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching prompt {prompt_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.patch("/dashboard/prompt/{prompt_id}", dependencies=[Depends(verify_api_key)])
+async def patch_prompt(prompt_id: int, request: PromptPatchRequest):
+    """Update fields on an existing prompt."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        await db_instance.update_prompt(
+            prompt_id,
+            name=request.name,
+            content=request.content,
+            industry=request.industry,
+            description=request.description,
+            is_active=request.is_active,
+        )
+        return {"status": "updated"}
+    except Exception as e:
+        logger.error(f"Error updating prompt {prompt_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.delete("/dashboard/prompt/{prompt_id}", dependencies=[Depends(verify_api_key)])
+async def delete_prompt(prompt_id: int):
+    """Delete a prompt by ID."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        await db_instance.delete_prompt(prompt_id)
+        return {"status": "deleted"}
+    except Exception as e:
+        logger.error(f"Error deleting prompt {prompt_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/dashboard/prompt/{prompt_id}/clone", dependencies=[Depends(verify_api_key)])
+async def clone_prompt(prompt_id: int, request: PromptCloneRequest):
+    """Clone an existing prompt to a new name/industry."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        new_id = await db_instance.clone_prompt(prompt_id, request.new_name, request.new_industry)
+        return {"status": "cloned", "id": new_id}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error cloning prompt {prompt_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+# --- Agent Config endpoints ---
+
+@app.get("/dashboard/agents", dependencies=[Depends(verify_api_key)])
+async def get_all_agents():
+    """List all agent configurations."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        return await db_instance.get_all_agent_configs()
+    except Exception as e:
+        logger.error(f"Error fetching agents: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/dashboard/agents", dependencies=[Depends(verify_api_key)])
+async def upsert_agent(request: AgentConfigUpsertRequest):
+    """Create or update an agent configuration."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        slug = await db_instance.upsert_agent_config(
+            slug=request.slug,
+            owner_id=request.owner_id,
+            opening_line=request.opening_line,
+            mcp_endpoint_url=request.mcp_endpoint_url,
+            is_active=request.is_active,
+        )
+        return {"status": "ok", "slug": slug}
+    except Exception as e:
+        logger.error(f"Error upserting agent: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.delete("/dashboard/agent/{slug}", dependencies=[Depends(verify_api_key)])
+async def delete_agent(slug: str):
+    """Delete an agent configuration."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        await db_instance.delete_agent_config(slug)
+        return {"status": "deleted"}
+    except Exception as e:
+        logger.error(f"Error deleting agent {slug}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+# --- Data Schema endpoints ---
+
+@app.get("/dashboard/data-schemas", dependencies=[Depends(verify_api_key)])
+async def get_data_schemas(slug: Optional[str] = None):
+    """List data schema fields, optionally filtered by agent slug."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        return await db_instance.get_all_data_schemas(slug=slug)
+    except Exception as e:
+        logger.error(f"Error fetching data schemas: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/dashboard/data-schemas", dependencies=[Depends(verify_api_key)])
+async def create_data_schema_field(request: DataSchemaFieldRequest):
+    """Add a data collection field to an agent's schema."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        field_id = await db_instance.create_data_schema_field(
+            slug=request.slug,
+            field_name=request.field_name,
+            field_type=request.field_type,
+            description=request.description,
+        )
+        return {"status": "created", "id": field_id}
+    except Exception as e:
+        logger.error(f"Error creating schema field: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.delete("/dashboard/data-schema/{field_id}", dependencies=[Depends(verify_api_key)])
+async def delete_data_schema_field(field_id: int):
+    """Delete a data schema field."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        await db_instance.delete_data_schema_field(field_id)
+        return {"status": "deleted"}
+    except Exception as e:
+        logger.error(f"Error deleting schema field {field_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+# --- Test call with specific prompt ---
+
+@app.post("/dashboard/test-call", dependencies=[Depends(verify_api_key)])
+async def trigger_test_call(request: TestCallRequest, background_tasks: BackgroundTasks, req: Request):
+    """Trigger a test call using a specific prompt from the DB.
+
+    This temporarily activates the chosen prompt for the agent_slug,
+    then dispatches a call.  The prompt is set as active so the agent
+    picks it up on join.
+    """
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    client_ip = req.client.host if req.client else "unknown"
+    _check_rate_limit(client_ip)
+
+    # Load the chosen prompt and make it active for the agent
+    prompt = await db_instance.get_prompt_by_id(request.prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+
+    # Activate this prompt under the agent slug name
+    await db_instance.update_active_prompt(request.agent_slug, prompt["content"])
+
+    # Dispatch normal outbound call
+    call_request = OutboundCallRequest(
+        phone_number=request.phone_number,
+        business_name=request.business_name or f"Test ({prompt.get('industry', 'general')})",
+        agent_slug=request.agent_slug,
+        from_number=request.from_number,
+    )
+    background_tasks.add_task(initiate_outbound_call, call_request)
+
+    return {
+        "status": "queued",
+        "message": f"Test call to {request.phone_number} using prompt '{prompt['name']}' ({prompt.get('industry', '')})",
+        "prompt_name": prompt["name"],
+        "industry": prompt.get("industry", ""),
+    }
 
 @app.get("/dashboard/prompt", dependencies=[Depends(verify_api_key)])
 async def get_active_prompt(name: str = "default_roofing_agent"):

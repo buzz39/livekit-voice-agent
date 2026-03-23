@@ -99,9 +99,10 @@ export async function getAppointments() {
   }
 }
 
-export const getAllPrompts = async () => {
+export const getAllPrompts = async (industry = null) => {
   try {
-    const response = await apiFetch('/dashboard/prompts');
+    const url = industry ? `/dashboard/prompts?industry=${encodeURIComponent(industry)}` : '/dashboard/prompts';
+    const response = await apiFetch(url);
     if (!response.ok) throw new Error('Failed to fetch prompts');
     return await response.json();
   } catch (error) {
@@ -182,4 +183,126 @@ export async function startOutboundCall(phoneNumber, businessName = "Default Bus
     console.error("Failed to start call:", error);
     throw error;
   }
+}
+
+// --- Prompt CRUD ---
+
+export async function getPromptById(promptId) {
+  const response = await apiFetch(`/dashboard/prompt/${promptId}`);
+  if (!response.ok) throw new Error('Failed to fetch prompt');
+  return await response.json();
+}
+
+export async function createPrompt({ name, content, industry = 'general', description = '', is_active = true }) {
+  const response = await apiFetch('/dashboard/prompts', {
+    method: 'POST',
+    body: JSON.stringify({ name, content, industry, description, is_active }),
+  });
+  if (!response.ok) throw new Error('Failed to create prompt');
+  return await response.json();
+}
+
+export async function patchPrompt(promptId, fields) {
+  const response = await apiFetch(`/dashboard/prompt/${promptId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(fields),
+  });
+  if (!response.ok) throw new Error('Failed to update prompt');
+  return await response.json();
+}
+
+export async function deletePrompt(promptId) {
+  const response = await apiFetch(`/dashboard/prompt/${promptId}`, { method: 'DELETE' });
+  if (!response.ok) throw new Error('Failed to delete prompt');
+  return await response.json();
+}
+
+export async function clonePrompt(promptId, newName, newIndustry) {
+  const response = await apiFetch(`/dashboard/prompt/${promptId}/clone`, {
+    method: 'POST',
+    body: JSON.stringify({ new_name: newName, new_industry: newIndustry }),
+  });
+  if (!response.ok) throw new Error('Failed to clone prompt');
+  return await response.json();
+}
+
+export async function getIndustries() {
+  try {
+    const response = await apiFetch('/dashboard/industries');
+    if (!response.ok) throw new Error('Failed to fetch industries');
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching industries:', error);
+    return [];
+  }
+}
+
+// --- Agent Config CRUD ---
+
+export async function getAgents() {
+  try {
+    const response = await apiFetch('/dashboard/agents');
+    if (!response.ok) throw new Error('Failed to fetch agents');
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching agents:', error);
+    return [];
+  }
+}
+
+export async function upsertAgent(agent) {
+  const response = await apiFetch('/dashboard/agents', {
+    method: 'POST',
+    body: JSON.stringify(agent),
+  });
+  if (!response.ok) throw new Error('Failed to save agent');
+  return await response.json();
+}
+
+export async function deleteAgent(slug) {
+  const response = await apiFetch(`/dashboard/agent/${encodeURIComponent(slug)}`, { method: 'DELETE' });
+  if (!response.ok) throw new Error('Failed to delete agent');
+  return await response.json();
+}
+
+// --- Data Schema CRUD ---
+
+export async function getDataSchemas(slug = null) {
+  try {
+    const url = slug ? `/dashboard/data-schemas?slug=${encodeURIComponent(slug)}` : '/dashboard/data-schemas';
+    const response = await apiFetch(url);
+    if (!response.ok) throw new Error('Failed to fetch schemas');
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching data schemas:', error);
+    return [];
+  }
+}
+
+export async function createDataSchemaField(field) {
+  const response = await apiFetch('/dashboard/data-schemas', {
+    method: 'POST',
+    body: JSON.stringify(field),
+  });
+  if (!response.ok) throw new Error('Failed to create schema field');
+  return await response.json();
+}
+
+export async function deleteDataSchemaField(fieldId) {
+  const response = await apiFetch(`/dashboard/data-schema/${fieldId}`, { method: 'DELETE' });
+  if (!response.ok) throw new Error('Failed to delete schema field');
+  return await response.json();
+}
+
+// --- Test Call with specific prompt ---
+
+export async function startTestCall({ phone_number, prompt_id, business_name = '', agent_slug = 'default_roofing_agent', from_number = null }) {
+  const body = { phone_number, prompt_id, business_name, agent_slug };
+  if (from_number) body.from_number = from_number;
+  const response = await apiFetch('/dashboard/test-call', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+  return await response.json();
 }

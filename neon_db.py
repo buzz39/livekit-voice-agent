@@ -54,18 +54,96 @@ class NeonDB:
             )
             return row["content"] if row else None
 
-    async def get_all_prompts(self) -> List[Dict[str, Any]]:
-        """Fetch all available prompts."""
+    async def get_all_prompts(self, industry: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Fetch all available prompts, optionally filtered by industry."""
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch("SELECT name, is_active FROM prompts ORDER BY name")
-            return [dict(row) for row in rows]
-    
+            if industry:
+                rows = await conn.fetch(
+                    "SELECT id, name, industry, description, is_active, created_at, updated_at FROM prompts WHERE industry = $1 ORDER BY name",
+                    industry,
+                )
+            else:
+                rows = await conn.fetch(
+                    "SELECT id, name, industry, description, is_active, created_at, updated_at FROM prompts ORDER BY industry, name"
+                )
+            result = []
+            for row in rows:
+                d = dict(row)
+                for key in ("created_at", "updated_at"):
+                    if d.get(key):
+                        d[key] = d[key].isoformat()
+                result.append(d)
+            return result
+
+    async def get_prompt_by_id(self, prompt_id: int) -> Optional[Dict[str, Any]]:
+        """Fetch a single prompt by ID with full content."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT id, name, content, industry, description, is_active, created_at, updated_at FROM prompts WHERE id = $1",
+                prompt_id,
+            )
+            if not row:
+                return None
+            d = dict(row)
+            for key in ("created_at", "updated_at"):
+                if d.get(key):
+                    d[key] = d[key].isoformat()
+            return d
+
+    async def create_prompt(self, name: str, content: str, industry: str = "general", description: str = "", is_active: bool = True) -> int:
+        """Create a new prompt and return its ID."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                INSERT INTO prompts (name, content, industry, description, is_active)
+                VALUES ($1, $2, $3, $4, $5)
+                RETURNING id
+            """, name, content, industry, description, is_active)
+            return row["id"]
+
+    async def update_prompt(self, prompt_id: int, name: Optional[str] = None, content: Optional[str] = None, industry: Optional[str] = None, description: Optional[str] = None, is_active: Optional[bool] = None):
+        """Update a prompt by ID. Only provided fields are changed."""
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE prompts
+                SET name        = COALESCE($2, name),
+                    content     = COALESCE($3, content),
+                    industry    = COALESCE($4, industry),
+                    description = COALESCE($5, description),
+                    is_active   = COALESCE($6, is_active),
+                    updated_at  = NOW()
+                WHERE id = $1
+            """, prompt_id, name, content, industry, description, is_active)
+
+    async def delete_prompt(self, prompt_id: int):
+        """Delete a prompt by ID."""
+        async with self.pool.acquire() as conn:
+            await conn.execute("DELETE FROM prompts WHERE id = $1", prompt_id)
+
+    async def get_industries(self) -> List[str]:
+        """Return distinct industry values from prompts table."""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("SELECT DISTINCT industry FROM prompts WHERE industry IS NOT NULL ORDER BY industry")
+            return [row["industry"] for row in rows]
+
+    async def clone_prompt(self, prompt_id: int, new_name: str, new_industry: str) -> int:
+        """Clone an existing prompt into a new industry/name."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT content, description FROM prompts WHERE id = $1",
+                prompt_id,
+            )
+            if not row:
+                raise ValueError("Source prompt not found")
+            new_id = await conn.fetchval("""
+                INSERT INTO prompts (name, content, industry, description, is_active)
+                VALUES ($1, $2, $3, $4, true)
+                RETURNING id
+            """, new_name, row["content"], new_industry, row["description"])
+            return new_id
+
     async def update_active_prompt(self, name: str, content: str):
         """Update active prompt content."""
         async with self.pool.acquire() as conn:
-            # Check if updated_at column exists in prompts table, if not, skip it.
-            # Assuming it exists based on other tables or just try-catch.
-            # Standard practice is it exists.
             try:
                 await conn.execute("""
                     UPDATE prompts
@@ -73,7 +151,6 @@ class NeonDB:
                     WHERE name = $1 AND is_active = true
                 """, name, content)
             except asyncpg.UndefinedColumnError:
-                # Fallback if updated_at doesn't exist
                 await conn.execute("""
                     UPDATE prompts
                     SET content = $2
@@ -397,6 +474,85 @@ class NeonDB:
             # result is e.g. "UPDATE 1" or "UPDATE 0"
             if result and result.endswith("0"):
                 logger.warning("update_ai_config: no active config row found for name=%s", name)
+
+    # --- Agent Config CRUD ---
+
+    async def get_all_agent_configs(self) -> List[Dict[str, Any]]:
+        """Fetch all agent configurations."""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT slug, owner_id, opening_line, mcp_endpoint_url, is_active, created_at, updated_at
+                FROM agent_configs ORDER BY slug
+            """)
+            result = []
+            for row in rows:
+                d = dict(row)
+                for key in ("created_at", "updated_at"):
+                    if d.get(key):
+                        d[key] = d[key].isoformat()
+                result.append(d)
+            return result
+
+    async def upsert_agent_config(self, slug: str, owner_id: str, opening_line: str = "", mcp_endpoint_url: str = "", is_active: bool = True) -> str:
+        """Create or update an agent configuration. Returns slug."""
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO agent_configs (slug, owner_id, opening_line, mcp_endpoint_url, is_active)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (slug)
+                DO UPDATE SET
+                    opening_line = EXCLUDED.opening_line,
+                    mcp_endpoint_url = EXCLUDED.mcp_endpoint_url,
+                    is_active = EXCLUDED.is_active,
+                    updated_at = NOW()
+            """, slug, owner_id, opening_line, mcp_endpoint_url, is_active)
+            return slug
+
+    async def delete_agent_config(self, slug: str):
+        """Delete an agent configuration by slug."""
+        async with self.pool.acquire() as conn:
+            await conn.execute("DELETE FROM agent_configs WHERE slug = $1", slug)
+
+    # --- Data Schema CRUD ---
+
+    async def get_all_data_schemas(self, slug: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Fetch data schemas, optionally filtered by agent slug."""
+        async with self.pool.acquire() as conn:
+            if slug:
+                rows = await conn.fetch(
+                    "SELECT id, slug, field_name, field_type, description, validation_rules, created_at FROM data_schemas WHERE slug = $1 ORDER BY id",
+                    slug,
+                )
+            else:
+                rows = await conn.fetch("SELECT id, slug, field_name, field_type, description, validation_rules, created_at FROM data_schemas ORDER BY slug, id")
+            result = []
+            for row in rows:
+                d = dict(row)
+                if d.get("created_at"):
+                    d["created_at"] = d["created_at"].isoformat()
+                if d.get("validation_rules") and isinstance(d["validation_rules"], str):
+                    try:
+                        d["validation_rules"] = json.loads(d["validation_rules"])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                result.append(d)
+            return result
+
+    async def create_data_schema_field(self, slug: str, field_name: str, field_type: str = "string", description: str = "", owner_id: str = "", validation_rules: Optional[Dict] = None) -> int:
+        """Create a data schema field. Returns its ID."""
+        async with self.pool.acquire() as conn:
+            rules_json = json.dumps(validation_rules) if validation_rules else None
+            row = await conn.fetchrow("""
+                INSERT INTO data_schemas (slug, field_name, field_type, description, owner_id, validation_rules)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                RETURNING id
+            """, slug, field_name, field_type, description, owner_id, rules_json)
+            return row["id"]
+
+    async def delete_data_schema_field(self, field_id: int):
+        """Delete a data schema field by ID."""
+        async with self.pool.acquire() as conn:
+            await conn.execute("DELETE FROM data_schemas WHERE id = $1", field_id)
 
 
 async def get_db() -> NeonDB:

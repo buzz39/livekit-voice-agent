@@ -6,7 +6,8 @@ import Terminal from './components/dashboard/Terminal';
 import StatsCard from './components/dashboard/StatsCard';
 import RiskBadge from './components/dashboard/RiskBadge';
 import ActiveCallPanel from './components/dashboard/ActiveCallPanel';
-import PromptPanel from './components/dashboard/PromptPanel';
+import PromptLab from './components/dashboard/PromptLab';
+import DatabaseExplorer from './components/dashboard/DatabaseExplorer';
 import CallLogs from './components/dashboard/CallLogs';
 import Analytics from './components/dashboard/Analytics';
 import Calendar from './components/dashboard/Calendar';
@@ -244,21 +245,12 @@ function Dashboard() {
         </div>
       )}
 
-      {currentView === 'settings' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-[calc(100vh-6rem)]">
-          <div className="h-full"><PromptPanel /></div>
-          <div className="bg-slate-900 border border-slate-800 rounded-lg p-6 flex items-center justify-center text-slate-500">
-            More settings coming soon...
-          </div>
-        </div>
-      )}
+      {currentView === 'prompt-lab' && <PromptLab />}
 
       {currentView === 'call-logs' && <CallLogs />}
       {currentView === 'analytics' && <Analytics />}
       {currentView === 'calendar' && <Calendar />}
-      {currentView === 'database' && (
-        <div className="flex items-center justify-center h-full text-slate-500">Work in progress...</div>
-      )}
+      {currentView === 'database' && <DatabaseExplorer />}
     </DashboardLayout>
   );
 }

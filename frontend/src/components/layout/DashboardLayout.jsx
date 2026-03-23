@@ -1,5 +1,5 @@
 import React from 'react';
-import { Activity, Phone, Database, LayoutDashboard, Settings, BarChart, Calendar, LogOut } from 'lucide-react';
+import { Activity, Phone, Database, LayoutDashboard, FlaskConical, BarChart, Calendar, LogOut } from 'lucide-react';
 import { useUser } from '@stackframe/react';
 
 const DashboardLayout = ({ children, activeTab = 'command-center', onTabChange }) => {
@@ -47,10 +47,10 @@ const DashboardLayout = ({ children, activeTab = 'command-center', onTabChange }
             onClick={() => onTabChange && onTabChange('call-logs')}
           />
           <NavItem
-            icon={<Calendar />}
-            label="Calendar"
-            active={activeTab === 'calendar'}
-            onClick={() => onTabChange && onTabChange('calendar')}
+            icon={<FlaskConical />}
+            label="Prompt Lab"
+            active={activeTab === 'prompt-lab'}
+            onClick={() => onTabChange && onTabChange('prompt-lab')}
           />
           <NavItem
             icon={<Database />}
@@ -59,10 +59,10 @@ const DashboardLayout = ({ children, activeTab = 'command-center', onTabChange }
             onClick={() => onTabChange && onTabChange('database')}
           />
           <NavItem
-            icon={<Settings />}
-            label="Settings"
-            active={activeTab === 'settings'}
-            onClick={() => onTabChange && onTabChange('settings')}
+            icon={<Calendar />}
+            label="Calendar"
+            active={activeTab === 'calendar'}
+            onClick={() => onTabChange && onTabChange('calendar')}
           />
         </nav>
 
