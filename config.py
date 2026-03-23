@@ -16,7 +16,7 @@ DEFAULT_STT_LANGUAGE = os.getenv("DEFAULT_STT_LANGUAGE", "en-US")
 
 _tts_provider_default = os.getenv("TTS_PROVIDER", "openai")
 DEFAULT_TTS_PROVIDER = os.getenv("DEFAULT_TTS_PROVIDER", _tts_provider_default)
-OPENAI_TTS_MODEL = os.getenv("OPENAI_TTS_MODEL", "tts-1")
+OPENAI_TTS_MODEL = os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
 OPENAI_TTS_VOICE = os.getenv("OPENAI_TTS_VOICE", "alloy")
 DEEPGRAM_TTS_MODEL = os.getenv("DEEPGRAM_TTS_MODEL", "aura-asteria-en")
 CARTESIA_TTS_MODEL = os.getenv("CARTESIA_TTS_MODEL", "sonic-2")

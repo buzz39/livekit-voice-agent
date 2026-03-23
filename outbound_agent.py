@@ -15,7 +15,7 @@ from livekit.agents import (
 from livekit.agents.voice.room_io import RoomInputOptions
 from livekit.agents.voice.events import ErrorEvent
 from livekit.agents.llm import LLMError
-from livekit.plugins import noise_cancellation
+from livekit.plugins import noise_cancellation, silero, turn_detector
 from livekit import api
 from livekit import rtc
 
@@ -260,16 +260,21 @@ async def _run_entrypoint(ctx: JobContext):
             logger.warning("call.failed webhook error during provider initialization: %s", dispatch_error)
         return
 
-    # Use STT-based turn detection instead of Silero VAD to avoid the
-    # 0.6–1s inference delay that was making the agent feel sluggish on
-    # the container's CPU budget.  Deepgram's endpointing handles
-    # silence/speech gating natively.
+    # Multilingual turn detector for semantic end-of-turn detection,
+    # paired with Silero VAD for responsive interruption handling.
+    # preemptive_generation starts LLM+TTS before turn is fully committed
+    # to reduce perceived latency.  min_interruption_words=3 prevents
+    # background noise from cutting off agent speech.
     session = AgentSession(
-        turn_detection="stt",
+        turn_detection=turn_detector.MultilingualModel(),
         stt=stt,
         llm=llm,
         tts=tts,
-        min_endpointing_delay=0.07,
+        vad=silero.VAD.load(),
+        min_endpointing_delay=0.5,
+        max_endpointing_delay=6.0,
+        min_interruption_words=3,
+        preemptive_generation=True,
     )
 
     # --- Agent Observability: collect & log STT/LLM/TTS latency metrics ---
@@ -400,7 +405,7 @@ async def _run_entrypoint(ctx: JobContext):
     logger.info("LiveKit agent session is ready; sending opening line")
     
     try:
-        await session.say(opening_line, allow_interruptions=True)
+        await session.say(opening_line, allow_interruptions=False)
     except Exception as e:
         logger.warning(f"Failed to play opening line: {e}")
 
