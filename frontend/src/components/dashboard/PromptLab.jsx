@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import {
   getAllPrompts, getPromptById, createPrompt, patchPrompt,
-  deletePrompt, clonePrompt, getIndustries, startTestCall,
+  deletePrompt, clonePrompt, getIndustries, startTestCall, getAgents,
 } from '../../api';
 
 const INDUSTRY_COLORS = {
@@ -47,6 +47,8 @@ export default function PromptLab() {
   const [testTarget, setTestTarget] = useState(null);
   const [testPhone, setTestPhone] = useState('');
   const [testFrom, setTestFrom] = useState('');
+  const [testAgentSlug, setTestAgentSlug] = useState('default_roofing_agent');
+  const [agents, setAgents] = useState([]);
 
   // Feedback
   const [toast, setToast] = useState(null);
@@ -59,12 +61,14 @@ export default function PromptLab() {
   // --- Data loading ---
   const loadData = useCallback(async () => {
     setLoading(true);
-    const [promptsList, industryList] = await Promise.all([
+    const [promptsList, industryList, agentsList] = await Promise.all([
       getAllPrompts(filterIndustry || undefined),
       getIndustries(),
+      getAgents(),
     ]);
     setPrompts(promptsList || []);
     setIndustries(industryList || []);
+    setAgents(agentsList || []);
     setLoading(false);
   }, [filterIndustry]);
 
@@ -159,12 +163,14 @@ export default function PromptLab() {
       await startTestCall({
         phone_number: testPhone,
         prompt_id: testTarget.id,
+        agent_slug: testAgentSlug,
         from_number: testFrom || null,
       });
       showToast(`Test call queued using "${testTarget.name}"`);
       setTestTarget(null);
       setTestPhone('');
       setTestFrom('');
+      setTestAgentSlug('default_roofing_agent');
     } catch (e) {
       showToast(e.message || 'Failed to start test call', 'error');
     }
@@ -462,6 +468,18 @@ export default function PromptLab() {
             <Field label="Phone Number (E.164)" required>
               <input value={testPhone} onChange={(e) => setTestPhone(e.target.value)}
                 placeholder="+919876543210" className={inputClass} />
+            </Field>
+            <Field label="Agent">
+              <div className="relative">
+                <select value={testAgentSlug} onChange={(e) => setTestAgentSlug(e.target.value)}
+                  className={`${inputClass} appearance-none pr-8`}>
+                  {agents.map(a => (
+                    <option key={a.slug} value={a.slug}>{a.slug}</option>
+                  ))}
+                  {agents.length === 0 && <option value="default_roofing_agent">default_roofing_agent</option>}
+                </select>
+                <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
             </Field>
             <Field label="From Number (optional)">
               <input value={testFrom} onChange={(e) => setTestFrom(e.target.value)}

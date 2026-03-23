@@ -64,7 +64,7 @@ class PlaygroundAgent:
 
             # Fetch instructions
             logger.info("Preparing instructions...")
-            agent_instructions = await prepare_instructions(self.db, self.agent_slug, schema_fields)
+            agent_instructions = await prepare_instructions(self.db, self.agent_slug, schema_fields, agent_config=agent_config)
 
             # Upsert contact
             logger.info("Upserting contact...")
@@ -105,7 +105,7 @@ class PlaygroundAgent:
             )
 
             # AI Config
-            ai_config = await load_ai_config(self.db, self.agent_slug)
+            ai_config = await load_ai_config(self.db, self.agent_slug, agent_config=agent_config)
 
             # Construct Agent
             agent = Agent(instructions=agent_instructions, tools=all_tools)

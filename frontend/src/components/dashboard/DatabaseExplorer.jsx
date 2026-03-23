@@ -6,6 +6,7 @@ import {
 import {
   getAgents, upsertAgent, deleteAgent,
   getDataSchemas, createDataSchemaField, deleteDataSchemaField,
+  getAllPrompts, getAllAiConfigs,
 } from '../../api';
 
 export default function DatabaseExplorer() {
@@ -47,16 +48,25 @@ function TabBtn({ active, onClick, icon, label }) {
 // ========== Agents Panel ==========
 function AgentsPanel() {
   const [agents, setAgents] = useState([]);
+  const [prompts, setPrompts] = useState([]);
+  const [aiConfigs, setAiConfigs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ slug: '', owner_id: '', opening_line: '', mcp_endpoint_url: '', is_active: true });
+  const [form, setForm] = useState({ slug: '', owner_id: '', opening_line: '', mcp_endpoint_url: '', is_active: true, prompt_id: null, ai_config_name: '' });
   const [toast, setToast] = useState(null);
 
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); };
 
   const load = async () => {
     setLoading(true);
-    setAgents(await getAgents());
+    const [agentsList, promptsList, aiConfigsList] = await Promise.all([
+      getAgents(),
+      getAllPrompts(),
+      getAllAiConfigs(),
+    ]);
+    setAgents(agentsList);
+    setPrompts(promptsList);
+    setAiConfigs(aiConfigsList);
     setLoading(false);
   };
 
@@ -68,13 +78,13 @@ function AgentsPanel() {
       await upsertAgent(form);
       showToast('Agent saved');
       setShowForm(false);
-      setForm({ slug: '', owner_id: '', opening_line: '', mcp_endpoint_url: '', is_active: true });
+      setForm({ slug: '', owner_id: '', opening_line: '', mcp_endpoint_url: '', is_active: true, prompt_id: null, ai_config_name: '' });
       load();
     } catch { showToast('Failed to save', 'error'); }
   };
 
   const handleEdit = (agent) => {
-    setForm(agent);
+    setForm({ ...agent, prompt_id: agent.prompt_id || null, ai_config_name: agent.ai_config_name || '' });
     setShowForm(true);
   };
 
@@ -92,7 +102,7 @@ function AgentsPanel() {
       {toast && <Toast toast={toast} />}
 
       <div className="flex justify-end">
-        <button onClick={() => { setForm({ slug: '', owner_id: '', opening_line: '', mcp_endpoint_url: '', is_active: true }); setShowForm(true); }}
+        <button onClick={() => { setForm({ slug: '', owner_id: '', opening_line: '', mcp_endpoint_url: '', is_active: true, prompt_id: null, ai_config_name: '' }); setShowForm(true); }}
           className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm text-white">
           <Plus size={14} /> Add Agent
         </button>
@@ -121,6 +131,8 @@ function AgentsPanel() {
                 </div>
               </div>
               {a.opening_line && <p className="mt-2 text-xs text-slate-400 italic">"{a.opening_line}"</p>}
+              {a.prompt_id && <p className="mt-1 text-[10px] text-indigo-400">Prompt: {prompts.find(p => p.id === a.prompt_id)?.name || `#${a.prompt_id}`}</p>}
+              {a.ai_config_name && <p className="mt-0.5 text-[10px] text-cyan-400">AI Config: {a.ai_config_name}</p>}
               {a.mcp_endpoint_url && <p className="mt-1 text-[10px] text-slate-500 truncate">MCP: {a.mcp_endpoint_url}</p>}
             </div>
           ))}
@@ -134,6 +146,30 @@ function AgentsPanel() {
             <Field label="Slug (unique ID)" required>
               <input value={form.slug} onChange={(e) => setForm(f => ({ ...f, slug: e.target.value }))}
                 placeholder="e.g. solar_sales_agent" className={inputClass} disabled={agents.some(a => a.slug === form.slug)} />
+            </Field>
+            <Field label="Linked Prompt">
+              <div className="relative">
+                <select value={form.prompt_id || ''} onChange={(e) => setForm(f => ({ ...f, prompt_id: e.target.value ? parseInt(e.target.value) : null }))}
+                  className={`${inputClass} appearance-none pr-8`}>
+                  <option value="">-- None (fallback to slug name) --</option>
+                  {prompts.map(p => (
+                    <option key={p.id} value={p.id}>{p.name} ({p.industry || 'general'})</option>
+                  ))}
+                </select>
+                <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
+            </Field>
+            <Field label="AI Config">
+              <div className="relative">
+                <select value={form.ai_config_name || ''} onChange={(e) => setForm(f => ({ ...f, ai_config_name: e.target.value || null }))}
+                  className={`${inputClass} appearance-none pr-8`}>
+                  <option value="">-- Default --</option>
+                  {aiConfigs.map(c => (
+                    <option key={c.name} value={c.name}>{c.name}</option>
+                  ))}
+                </select>
+                <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
             </Field>
             <Field label="Opening Line">
               <textarea value={form.opening_line || ''} onChange={(e) => setForm(f => ({ ...f, opening_line: e.target.value }))}

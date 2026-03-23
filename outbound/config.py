@@ -23,12 +23,21 @@ async def load_agent_config(db: Any, agent_slug: str) -> Tuple[Dict[str, Any], A
 
     return agent_config, schema_fields, dispatcher, agent_slug
 
-async def prepare_instructions(db: Any, agent_slug: str, schema_fields: Any) -> str:
+async def prepare_instructions(db: Any, agent_slug: str, schema_fields: Any, agent_config: dict = None) -> str:
     """
     Fetches the active prompt and injects schema instructions.
+    Uses prompt_id from agent_config if available, otherwise falls back to slug name.
     """
-    # Fetch instructions
-    agent_instructions = await db.get_active_prompt(agent_slug)
+    agent_instructions = None
+
+    # Prefer prompt_id from agent_config (DB-driven link)
+    if agent_config and agent_config.get("prompt_id"):
+        agent_instructions = await db.get_prompt_content_by_id(agent_config["prompt_id"])
+
+    # Fallback: look up prompt by agent slug name
+    if not agent_instructions:
+        agent_instructions = await db.get_active_prompt(agent_slug)
+
     if not agent_instructions:
         agent_instructions = "You are a professional caller."
 
@@ -39,6 +48,18 @@ async def prepare_instructions(db: Any, agent_slug: str, schema_fields: Any) -> 
             schema_prompt += f"- {field['field_name']}: {field.get('description', '')}\n"
         schema_prompt += "\nUse the `update_call_data` tool to save these values."
         agent_instructions += schema_prompt
+
+    # Inject objection handlers from DB
+    try:
+        objections = await db.get_all_objections(agent_slug=agent_slug)
+        if objections:
+            objection_prompt = "\n\nOBJECTION HANDLING - When you hear these objections, respond as follows:\n"
+            for obj in objections:
+                if obj.get("response_text"):
+                    objection_prompt += f'- If they say "{obj["objection_text"]}", respond: {obj["response_text"]}\n'
+            agent_instructions += objection_prompt
+    except Exception as e:
+        logger.debug(f"Could not load objections: {e}")
 
     # Add required behavioral instructions
     additional_instructions = """
@@ -52,13 +73,18 @@ async def prepare_instructions(db: Any, agent_slug: str, schema_fields: Any) -> 
 
     return agent_instructions
 
-async def load_ai_config(db: Any, agent_slug: str = None) -> Dict[str, Any]:
+async def load_ai_config(db: Any, agent_slug: str = None, agent_config: dict = None) -> Dict[str, Any]:
     """
     Loads AI configuration (LLM/STT/TTS settings).
-    Prioritizes agent-specific config (using slug), falls back to default.
+    Prioritizes ai_config_name from agent_config, then slug, then default.
     """
     ai_config = None
-    if agent_slug:
+
+    # Prefer ai_config_name from agent_config (DB-driven link)
+    if agent_config and agent_config.get("ai_config_name"):
+        ai_config = await db.get_ai_config(agent_config["ai_config_name"])
+
+    if not ai_config and agent_slug:
         # Try to find config named after the agent slug
         ai_config = await db.get_ai_config(agent_slug)
 

@@ -102,7 +102,7 @@ async def _run_entrypoint(ctx: JobContext):
         logger.debug(f"call.initiated webhook error: {e}")
 
     # Fetch instructions (with schema injection)
-    agent_instructions = await prepare_instructions(db, agent_slug, schema_fields)
+    agent_instructions = await prepare_instructions(db, agent_slug, schema_fields, agent_config=agent_config)
 
     # Create contact
     contact_id = await db.upsert_contact(phone_number, business_name)
@@ -127,7 +127,7 @@ async def _run_entrypoint(ctx: JobContext):
     egress_manager = EgressManager(ctx.api)
 
     # AI Config
-    ai_config = await load_ai_config(db, agent_slug)
+    ai_config = await load_ai_config(db, agent_slug, agent_config=agent_config)
     resolved_ai_config = resolve_ai_configuration(ai_config=ai_config, metadata_overrides=initial_metadata)
     logger.info(
         "Resolved outbound AI pipeline: llm=%s/%s temp=%s, stt=%s/%s, tts=%s/%s voice=%s",

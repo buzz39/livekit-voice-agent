@@ -168,6 +168,8 @@ class AgentConfigUpsertRequest(BaseModel):
     opening_line: str = ""
     mcp_endpoint_url: str = ""
     is_active: bool = True
+    prompt_id: Optional[int] = None
+    ai_config_name: Optional[str] = None
 
 class DataSchemaFieldRequest(BaseModel):
     slug: str
@@ -507,6 +509,8 @@ async def upsert_agent(request: AgentConfigUpsertRequest):
             opening_line=request.opening_line,
             mcp_endpoint_url=request.mcp_endpoint_url,
             is_active=request.is_active,
+            prompt_id=request.prompt_id,
+            ai_config_name=request.ai_config_name,
         )
         return {"status": "ok", "slug": slug}
     except Exception as e:
@@ -565,6 +569,128 @@ async def delete_data_schema_field(field_id: int):
         return {"status": "deleted"}
     except Exception as e:
         logger.error(f"Error deleting schema field {field_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+# --- AI Config endpoints ---
+
+class AIConfigUpsertRequest(BaseModel):
+    name: str
+    llm_provider: str = "openai"
+    llm_model: str = "gpt-4o-mini"
+    llm_temperature: float = 0.7
+    stt_provider: str = "deepgram"
+    stt_model: str = "nova-3"
+    stt_language: str = "en-US"
+    tts_provider: str = "openai"
+    tts_model: str = "tts-1"
+    tts_voice: str = "alloy"
+    tts_language: str = ""
+    tts_speed: float = 1.0
+    vad_silence_threshold: float = 0.5
+    vad_sensitivity: float = 0.5
+    vad_interruption_threshold: float = 0.5
+    is_active: bool = True
+
+@app.get("/dashboard/ai-configs", dependencies=[Depends(verify_api_key)])
+async def get_all_ai_configs():
+    """List all AI configurations."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        return await db_instance.get_all_ai_configs()
+    except Exception as e:
+        logger.error(f"Error fetching AI configs: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/dashboard/ai-config", dependencies=[Depends(verify_api_key)])
+async def get_ai_config_by_name(name: str = "default_telephony_config"):
+    """Get a single AI config by name."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        config = await db_instance.get_ai_config(name)
+        if not config:
+            raise HTTPException(status_code=404, detail="AI config not found")
+        return config
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching AI config {name}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/dashboard/ai-configs", dependencies=[Depends(verify_api_key)])
+async def upsert_ai_config_endpoint(request: AIConfigUpsertRequest):
+    """Create or update an AI configuration."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        name = await db_instance.upsert_ai_config_full(
+            name=request.name,
+            llm_provider=request.llm_provider,
+            llm_model=request.llm_model,
+            llm_temperature=request.llm_temperature,
+            stt_provider=request.stt_provider,
+            stt_model=request.stt_model,
+            stt_language=request.stt_language,
+            tts_provider=request.tts_provider,
+            tts_model=request.tts_model,
+            tts_voice=request.tts_voice,
+            tts_language=request.tts_language,
+            tts_speed=request.tts_speed,
+            vad_silence_threshold=request.vad_silence_threshold,
+            vad_sensitivity=request.vad_sensitivity,
+            vad_interruption_threshold=request.vad_interruption_threshold,
+            is_active=request.is_active,
+        )
+        return {"status": "ok", "name": name}
+    except Exception as e:
+        logger.error(f"Error upserting AI config: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+# --- Objection endpoints ---
+
+class ObjectionUpsertRequest(BaseModel):
+    objection_text: str
+    response_text: str = ""
+    agent_slug: Optional[str] = None
+
+@app.get("/dashboard/objections", dependencies=[Depends(verify_api_key)])
+async def get_objections(agent_slug: Optional[str] = None):
+    """List objections, optionally filtered by agent_slug."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        return await db_instance.get_all_objections(agent_slug=agent_slug)
+    except Exception as e:
+        logger.error(f"Error fetching objections: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/dashboard/objections", dependencies=[Depends(verify_api_key)])
+async def upsert_objection(request: ObjectionUpsertRequest):
+    """Create or update an objection handler."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        await db_instance.upsert_objection(
+            objection_text=request.objection_text,
+            response_text=request.response_text,
+            agent_slug=request.agent_slug,
+        )
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Error upserting objection: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.delete("/dashboard/objection/{objection_id}", dependencies=[Depends(verify_api_key)])
+async def delete_objection(objection_id: int):
+    """Delete an objection handler."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        await db_instance.delete_objection(objection_id)
+        return {"status": "deleted"}
+    except Exception as e:
+        logger.error(f"Error deleting objection {objection_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 # --- Test call with specific prompt ---

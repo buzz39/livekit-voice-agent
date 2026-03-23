@@ -327,6 +327,46 @@ class NeonDB:
                     response_text = COALESCE(EXCLUDED.response_text, objections.response_text),
                     updated_at = NOW()
             """, objection_text, response_text)
+
+    async def get_all_objections(self, agent_slug: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Fetch all objection handlers, optionally filtered by agent_slug."""
+        async with self.pool.acquire() as conn:
+            if agent_slug:
+                rows = await conn.fetch("""
+                    SELECT id, objection_text, response_text, frequency, agent_slug, created_at, updated_at
+                    FROM objections WHERE agent_slug = $1 ORDER BY frequency DESC
+                """, agent_slug)
+            else:
+                rows = await conn.fetch("""
+                    SELECT id, objection_text, response_text, frequency, agent_slug, created_at, updated_at
+                    FROM objections ORDER BY frequency DESC
+                """)
+            result = []
+            for row in rows:
+                d = dict(row)
+                for key in ("created_at", "updated_at"):
+                    if d.get(key):
+                        d[key] = d[key].isoformat()
+                result.append(d)
+            return result
+
+    async def upsert_objection(self, objection_text: str, response_text: str = "", agent_slug: Optional[str] = None):
+        """Create or update an objection handler with response."""
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO objections (objection_text, response_text, agent_slug, frequency)
+                VALUES ($1, $2, $3, 0)
+                ON CONFLICT (objection_text)
+                DO UPDATE SET
+                    response_text = EXCLUDED.response_text,
+                    agent_slug = COALESCE(EXCLUDED.agent_slug, objections.agent_slug),
+                    updated_at = NOW()
+            """, objection_text, response_text, agent_slug)
+
+    async def delete_objection(self, objection_id: int):
+        """Delete an objection by ID."""
+        async with self.pool.acquire() as conn:
+            await conn.execute("DELETE FROM objections WHERE id = $1", objection_id)
     
     async def get_call_stats(self, days: int = 7) -> Dict[str, Any]:
         """Get call statistics for the last N days."""
@@ -426,14 +466,23 @@ class NeonDB:
             return [dict(row) for row in rows]
             
     async def get_agent_config(self, slug: str = "default-agent") -> Optional[Dict[str, Any]]:
-        """Fetch agent configuration (greeting, MCP URL, etc)."""
+        """Fetch agent configuration (greeting, MCP URL, prompt_id, ai_config_name)."""
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
-                SELECT opening_line, mcp_endpoint_url
+                SELECT opening_line, mcp_endpoint_url, prompt_id, ai_config_name
                 FROM agent_configs
                 WHERE slug = $1 AND is_active = true
             """, slug)
             return dict(row) if row else None
+
+    async def get_prompt_content_by_id(self, prompt_id: int) -> Optional[str]:
+        """Fetch just the prompt content string by ID."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT content FROM prompts WHERE id = $1 AND is_active = true",
+                prompt_id,
+            )
+            return row["content"] if row else None
 
     async def get_ai_config(self, name: str = "default_telephony_config") -> Optional[Dict[str, Any]]:
         """Fetch AI configuration (LLM, TTS, STT, VAD) by name."""
@@ -475,13 +524,85 @@ class NeonDB:
             if result and result.endswith("0"):
                 logger.warning("update_ai_config: no active config row found for name=%s", name)
 
+    async def get_all_ai_configs(self) -> List[Dict[str, Any]]:
+        """Fetch all AI configurations."""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT name,
+                    llm_provider, llm_model, llm_temperature,
+                    stt_provider, stt_model, stt_language,
+                    tts_provider, tts_model, tts_voice, tts_language, tts_speed,
+                    vad_silence_threshold, vad_sensitivity, vad_interruption_threshold,
+                    is_active, created_at, updated_at
+                FROM ai_configs ORDER BY name
+            """)
+            result = []
+            for row in rows:
+                d = dict(row)
+                for key in ("created_at", "updated_at"):
+                    if d.get(key):
+                        d[key] = d[key].isoformat()
+                result.append(d)
+            return result
+
+    async def upsert_ai_config_full(
+        self,
+        name: str,
+        llm_provider: str = "openai",
+        llm_model: str = "gpt-4o-mini",
+        llm_temperature: float = 0.7,
+        stt_provider: str = "deepgram",
+        stt_model: str = "nova-3",
+        stt_language: str = "en-US",
+        tts_provider: str = "openai",
+        tts_model: str = "tts-1",
+        tts_voice: str = "alloy",
+        tts_language: str = "",
+        tts_speed: float = 1.0,
+        vad_silence_threshold: float = 0.5,
+        vad_sensitivity: float = 0.5,
+        vad_interruption_threshold: float = 0.5,
+        is_active: bool = True,
+    ) -> str:
+        """Create or update an AI configuration. Returns name."""
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO ai_configs (name, llm_provider, llm_model, llm_temperature,
+                    stt_provider, stt_model, stt_language,
+                    tts_provider, tts_model, tts_voice, tts_language, tts_speed,
+                    vad_silence_threshold, vad_sensitivity, vad_interruption_threshold, is_active)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+                ON CONFLICT (name)
+                DO UPDATE SET
+                    llm_provider = EXCLUDED.llm_provider,
+                    llm_model = EXCLUDED.llm_model,
+                    llm_temperature = EXCLUDED.llm_temperature,
+                    stt_provider = EXCLUDED.stt_provider,
+                    stt_model = EXCLUDED.stt_model,
+                    stt_language = EXCLUDED.stt_language,
+                    tts_provider = EXCLUDED.tts_provider,
+                    tts_model = EXCLUDED.tts_model,
+                    tts_voice = EXCLUDED.tts_voice,
+                    tts_language = EXCLUDED.tts_language,
+                    tts_speed = EXCLUDED.tts_speed,
+                    vad_silence_threshold = EXCLUDED.vad_silence_threshold,
+                    vad_sensitivity = EXCLUDED.vad_sensitivity,
+                    vad_interruption_threshold = EXCLUDED.vad_interruption_threshold,
+                    is_active = EXCLUDED.is_active,
+                    updated_at = NOW()
+            """, name, llm_provider, llm_model, llm_temperature,
+                stt_provider, stt_model, stt_language,
+                tts_provider, tts_model, tts_voice, tts_language, tts_speed,
+                vad_silence_threshold, vad_sensitivity, vad_interruption_threshold, is_active)
+            return name
+
     # --- Agent Config CRUD ---
 
     async def get_all_agent_configs(self) -> List[Dict[str, Any]]:
         """Fetch all agent configurations."""
         async with self.pool.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT slug, owner_id, opening_line, mcp_endpoint_url, is_active, created_at, updated_at
+                SELECT slug, owner_id, opening_line, mcp_endpoint_url, is_active, prompt_id, ai_config_name, created_at, updated_at
                 FROM agent_configs ORDER BY slug
             """)
             result = []
@@ -493,19 +614,21 @@ class NeonDB:
                 result.append(d)
             return result
 
-    async def upsert_agent_config(self, slug: str, owner_id: str, opening_line: str = "", mcp_endpoint_url: str = "", is_active: bool = True) -> str:
+    async def upsert_agent_config(self, slug: str, owner_id: str, opening_line: str = "", mcp_endpoint_url: str = "", is_active: bool = True, prompt_id: Optional[int] = None, ai_config_name: Optional[str] = None) -> str:
         """Create or update an agent configuration. Returns slug."""
         async with self.pool.acquire() as conn:
             await conn.execute("""
-                INSERT INTO agent_configs (slug, owner_id, opening_line, mcp_endpoint_url, is_active)
-                VALUES ($1, $2, $3, $4, $5)
+                INSERT INTO agent_configs (slug, owner_id, opening_line, mcp_endpoint_url, is_active, prompt_id, ai_config_name)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 ON CONFLICT (slug)
                 DO UPDATE SET
                     opening_line = EXCLUDED.opening_line,
                     mcp_endpoint_url = EXCLUDED.mcp_endpoint_url,
                     is_active = EXCLUDED.is_active,
+                    prompt_id = EXCLUDED.prompt_id,
+                    ai_config_name = EXCLUDED.ai_config_name,
                     updated_at = NOW()
-            """, slug, owner_id, opening_line, mcp_endpoint_url, is_active)
+            """, slug, owner_id, opening_line, mcp_endpoint_url, is_active, prompt_id, ai_config_name)
             return slug
 
     async def delete_agent_config(self, slug: str):

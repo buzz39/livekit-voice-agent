@@ -306,3 +306,65 @@ export async function startTestCall({ phone_number, prompt_id, business_name = '
   if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
   return await response.json();
 }
+
+// --- AI Config CRUD ---
+
+export async function getAllAiConfigs() {
+  try {
+    const response = await apiFetch('/dashboard/ai-configs');
+    if (!response.ok) throw new Error('Failed to fetch AI configs');
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching AI configs:', error);
+    return [];
+  }
+}
+
+export async function getAiConfig(name) {
+  try {
+    const response = await apiFetch(`/dashboard/ai-config?name=${encodeURIComponent(name)}`);
+    if (!response.ok) throw new Error('Failed to fetch AI config');
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching AI config:', error);
+    return null;
+  }
+}
+
+export async function upsertAiConfig(config) {
+  const response = await apiFetch('/dashboard/ai-configs', {
+    method: 'POST',
+    body: JSON.stringify(config),
+  });
+  if (!response.ok) throw new Error('Failed to save AI config');
+  return await response.json();
+}
+
+// --- Objection CRUD ---
+
+export async function getObjections(agentSlug = null) {
+  try {
+    const url = agentSlug ? `/dashboard/objections?agent_slug=${encodeURIComponent(agentSlug)}` : '/dashboard/objections';
+    const response = await apiFetch(url);
+    if (!response.ok) throw new Error('Failed to fetch objections');
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching objections:', error);
+    return [];
+  }
+}
+
+export async function upsertObjection(objection) {
+  const response = await apiFetch('/dashboard/objections', {
+    method: 'POST',
+    body: JSON.stringify(objection),
+  });
+  if (!response.ok) throw new Error('Failed to save objection');
+  return await response.json();
+}
+
+export async function deleteObjection(id) {
+  const response = await apiFetch(`/dashboard/objection/${id}`, { method: 'DELETE' });
+  if (!response.ok) throw new Error('Failed to delete objection');
+  return await response.json();
+}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Activity, Phone, Database, LayoutDashboard, FlaskConical, BarChart, Calendar, LogOut } from 'lucide-react';
+import { Activity, Phone, Database, LayoutDashboard, FlaskConical, BarChart, Calendar, LogOut, Cpu, Shield } from 'lucide-react';
 import { useUser } from '@stackframe/react';
 
 const DashboardLayout = ({ children, activeTab = 'command-center', onTabChange }) => {
@@ -57,6 +57,18 @@ const DashboardLayout = ({ children, activeTab = 'command-center', onTabChange }
             label="Database"
             active={activeTab === 'database'}
             onClick={() => onTabChange && onTabChange('database')}
+          />
+          <NavItem
+            icon={<Cpu />}
+            label="AI Config"
+            active={activeTab === 'ai-config'}
+            onClick={() => onTabChange && onTabChange('ai-config')}
+          />
+          <NavItem
+            icon={<Shield />}
+            label="Objections"
+            active={activeTab === 'objections'}
+            onClick={() => onTabChange && onTabChange('objections')}
           />
           <NavItem
             icon={<Calendar />}

@@ -156,7 +156,7 @@ async def entrypoint(ctx: JobContext):
     })
 
     # Fetch and prepare agent instructions from database (with schema injection)
-    agent_instructions = await prepare_instructions(db, agent_slug, schema_fields)
+    agent_instructions = await prepare_instructions(db, agent_slug, schema_fields, agent_config=agent_config)
     logger.info(f"Agent instructions ready (first 120 chars): {agent_instructions[:120]}")
 
     # Create or update contact in database
@@ -170,7 +170,7 @@ async def entrypoint(ctx: JobContext):
     
     # Fetch AI configuration from database (agent-specific, then default fallback)
     logger.info("Fetching AI configuration from database...")
-    ai_config = await load_ai_config(db, agent_slug)
+    ai_config = await load_ai_config(db, agent_slug, agent_config=agent_config)
 
     resolved = resolve_ai_configuration(ai_config=ai_config)
     logger.info(

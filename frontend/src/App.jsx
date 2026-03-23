@@ -8,6 +8,8 @@ import RiskBadge from './components/dashboard/RiskBadge';
 import ActiveCallPanel from './components/dashboard/ActiveCallPanel';
 import PromptLab from './components/dashboard/PromptLab';
 import DatabaseExplorer from './components/dashboard/DatabaseExplorer';
+import AIConfigPanel from './components/dashboard/AIConfigPanel';
+import ObjectionManager from './components/dashboard/ObjectionManager';
 import CallLogs from './components/dashboard/CallLogs';
 import Analytics from './components/dashboard/Analytics';
 import Calendar from './components/dashboard/Calendar';
@@ -251,6 +253,8 @@ function Dashboard() {
       {currentView === 'analytics' && <Analytics />}
       {currentView === 'calendar' && <Calendar />}
       {currentView === 'database' && <DatabaseExplorer />}
+      {currentView === 'ai-config' && <AIConfigPanel />}
+      {currentView === 'objections' && <ObjectionManager />}
     </DashboardLayout>
   );
 }
