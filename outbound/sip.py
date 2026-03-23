@@ -77,6 +77,7 @@ async def dial_participant(ctx, phone_number: str, business_name: str, dispatche
                 participant_identity=final_identity,
                 participant_name=business_name,
                 wait_until_answered=True,
+                krisp_enabled=True,
             )
         )
         logger.info("Call answered or dialing request accepted")

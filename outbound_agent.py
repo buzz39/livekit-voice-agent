@@ -10,6 +10,7 @@ from livekit.agents import (
     WorkerOptions,
     cli,
     get_job_context,
+    metrics,
 )
 from livekit.agents.voice.room_io import RoomInputOptions
 from livekit.agents.voice.events import ErrorEvent
@@ -271,6 +272,14 @@ async def _run_entrypoint(ctx: JobContext):
         min_endpointing_delay=0.07,
     )
 
+    # --- Agent Observability: collect & log STT/LLM/TTS latency metrics ---
+    usage_collector = metrics.UsageCollector()
+
+    @session.on("metrics_collected")
+    def _on_metrics(mets: metrics.AgentMetrics):
+        metrics.log_metrics(mets)
+        usage_collector.collect(mets)
+
     # Handle LLM/TTS errors gracefully: speak a fallback message instead of
     # going silent when the model fails (e.g. function-calling APIError).
     @session.on("error")
@@ -413,6 +422,20 @@ async def _run_entrypoint(ctx: JobContext):
             return
 
         is_finalized = True
+
+        # Log usage summary before finalizing
+        try:
+            summary = usage_collector.get_summary()
+            logger.info(
+                "Usage summary: llm_prompt_tokens=%d, llm_completion_tokens=%d, "
+                "tts_characters=%d, stt_audio_duration=%.1fs",
+                summary.llm_prompt_tokens,
+                summary.llm_completion_tokens,
+                summary.tts_characters_count,
+                summary.stt_audio_duration,
+            )
+        except Exception as e:
+            logger.debug("Could not log usage summary: %s", e)
         
         await finalize_call_logic(
             ctx=ctx,

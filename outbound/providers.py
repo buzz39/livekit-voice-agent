@@ -79,7 +79,11 @@ def resolve_ai_configuration(ai_config: Dict[str, Any], metadata_overrides: Opti
         or (default_config.GROQ_TEMPERATURE if llm_provider == "groq" else default_config.DEFAULT_LLM_TEMPERATURE)
     )
 
-    stt_provider = default_config.DEFAULT_STT_PROVIDER.lower()
+    stt_provider = (
+        _override(metadata_overrides, "stt_provider")
+        or ai_config.get("stt_provider")
+        or default_config.DEFAULT_STT_PROVIDER
+    ).lower()
     stt_model = (
         _override(metadata_overrides, "stt_model")
         or ai_config.get("stt_model")
@@ -202,8 +206,18 @@ def build_llm(ai_config: Dict[str, Any], metadata_overrides: Optional[Dict[str, 
 
 def build_stt(ai_config: Dict[str, Any], metadata_overrides: Optional[Dict[str, Any]] = None):
     resolved = resolve_ai_configuration(ai_config=ai_config, metadata_overrides=metadata_overrides)
+    provider = resolved["stt_provider"]
     model = resolved["stt_model"]
     language = resolved["stt_language"]
+
+    if provider == "sarvam":
+        sarvam_lang = normalize_sarvam_language(language)
+        logger.info(f"Using Sarvam STT: {model or 'saarika:v2'}/{sarvam_lang}")
+        return sarvam.STT(
+            model=model if model and model not in ("nova-3", "nova-2") else "saarika:v2",
+            language_code=sarvam_lang,
+        )
+
     logger.info(f"Using Deepgram STT: {model}/{language}")
     return deepgram.STT(model=model, language=language)
 

@@ -105,7 +105,7 @@ const Analytics = () => {
             </div>
 
             {/* Charts Row 1 */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-80">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" style={{ minHeight: 320 }}>
                 {/* Call Volume Chart */}
                 <div className="bg-slate-900 border border-slate-800 rounded-lg p-6 flex flex-col">
                     <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Daily Call Volume</h3>
