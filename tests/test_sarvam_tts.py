@@ -59,6 +59,19 @@ def test_normalize_sarvam_speaker_returns_default_for_invalid():
     assert normalize_sarvam_speaker("nonexistent") == SARVAM_DEFAULT_VOICE
 
 
+def test_normalize_sarvam_speaker_model_aware_v2():
+    assert normalize_sarvam_speaker("anushka", "bulbul:v2") == "anushka"
+    assert normalize_sarvam_speaker("manisha", "bulbul:v2") == "manisha"
+    # v3 speaker invalid for v2
+    assert normalize_sarvam_speaker("simran", "bulbul:v2") == "anushka"
+
+
+def test_normalize_sarvam_speaker_model_aware_v3():
+    assert normalize_sarvam_speaker("simran", "bulbul:v3") == "simran"
+    # v2 speaker invalid for v3
+    assert normalize_sarvam_speaker("anushka", "bulbul:v3") == "shubh"
+
+
 # --- Model normalization ---
 
 def test_normalize_sarvam_model_passes_valid():

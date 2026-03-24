@@ -18,7 +18,7 @@ logger = logging.getLogger("outbound.sarvam_tts")
 
 SARVAM_API_URL = os.getenv("SARVAM_API_URL", "https://api.sarvam.ai/text-to-speech")
 SARVAM_STREAM_URL = os.getenv("SARVAM_STREAM_URL", "https://api.sarvam.ai/text-to-speech/stream")
-SARVAM_DEFAULT_VOICE = os.getenv("SARVAM_VOICE_ID", "simran")
+SARVAM_DEFAULT_VOICE = os.getenv("SARVAM_VOICE_ID", "shubh")
 SARVAM_DEFAULT_LANGUAGE = os.getenv("SARVAM_LANGUAGE", "en-IN")
 SARVAM_DEFAULT_MODEL = os.getenv("SARVAM_MODEL", "bulbul:v3")
 SARVAM_SAMPLE_RATE = int(os.getenv("SARVAM_SAMPLE_RATE", "8000"))
@@ -65,13 +65,13 @@ SARVAM_LANGUAGE_ALIASES = {
     "te": "te-IN",
     "telugu": "te-IN",
 }
-VALID_SARVAM_SPEAKERS = {
-    "aditya",
-    "anand",
-    "amit",
+VALID_SARVAM_SPEAKERS_V3 = {
     "aayan",
+    "aditya",
     "advait",
     "amelia",
+    "amit",
+    "anand",
     "ashutosh",
     "dev",
     "gokul",
@@ -83,7 +83,6 @@ VALID_SARVAM_SPEAKERS = {
     "mani",
     "mohit",
     "neha",
-    "niharika",
     "pooja",
     "priya",
     "rahul",
@@ -99,22 +98,47 @@ VALID_SARVAM_SPEAKERS = {
     "simran",
     "soham",
     "sophia",
-    "sumit",
     "suhani",
+    "sumit",
     "sunny",
     "tanya",
     "tarun",
     "varun",
     "vijay",
 }
+VALID_SARVAM_SPEAKERS_V2 = {
+    "abhilash",
+    "anushka",
+    "arya",
+    "hitesh",
+    "karun",
+    "manisha",
+    "vidya",
+}
+# Combined set kept for backward compatibility with imports
+VALID_SARVAM_SPEAKERS = VALID_SARVAM_SPEAKERS_V3 | VALID_SARVAM_SPEAKERS_V2
+
+_MODEL_SPEAKER_MAP = {
+    "bulbul:v3": VALID_SARVAM_SPEAKERS_V3,
+    "bulbul:v3-beta": VALID_SARVAM_SPEAKERS_V3,
+    "bulbul:v2": VALID_SARVAM_SPEAKERS_V2,
+}
+_MODEL_DEFAULT_VOICE = {
+    "bulbul:v3": "shubh",
+    "bulbul:v3-beta": "shubh",
+    "bulbul:v2": "anushka",
+}
 
 
-def normalize_sarvam_speaker(voice: Optional[str]) -> str:
+def normalize_sarvam_speaker(voice: Optional[str], model: Optional[str] = None) -> str:
+    resolved_model = normalize_sarvam_model(model) if model else SARVAM_DEFAULT_MODEL
+    valid_speakers = _MODEL_SPEAKER_MAP.get(resolved_model, VALID_SARVAM_SPEAKERS_V3)
+    default_voice = _MODEL_DEFAULT_VOICE.get(resolved_model, SARVAM_DEFAULT_VOICE)
     if voice:
         normalized = voice.strip().lower()
-        if normalized in VALID_SARVAM_SPEAKERS:
+        if normalized in valid_speakers:
             return normalized
-    return SARVAM_DEFAULT_VOICE
+    return default_voice
 
 
 def normalize_sarvam_model(model: Optional[str]) -> str:
@@ -162,9 +186,9 @@ class SarvamTTS(TTS):
             sample_rate=sample_rate,
             num_channels=num_channels,
         )
-        self._voice = normalize_sarvam_speaker(voice or SARVAM_DEFAULT_VOICE)
-        self._language = normalize_sarvam_language(language or SARVAM_DEFAULT_LANGUAGE)
         self._model = normalize_sarvam_model(model or SARVAM_DEFAULT_MODEL)
+        self._voice = normalize_sarvam_speaker(voice or SARVAM_DEFAULT_VOICE, self._model)
+        self._language = normalize_sarvam_language(language or SARVAM_DEFAULT_LANGUAGE)
         self._pace = pace
         self._api_key = api_key or os.getenv("SARVAM_API_KEY", "")
         self._api_url = api_url or SARVAM_STREAM_URL
@@ -237,8 +261,8 @@ class _SarvamChunkedStream(ChunkedStream):
             mime_type="audio/pcm",
         )
 
-        speaker = normalize_sarvam_speaker(self._voice)
         model = normalize_sarvam_model(self._model)
+        speaker = normalize_sarvam_speaker(self._voice, model)
         language = normalize_sarvam_language(self._language)
         if speaker != self._voice:
             logger.warning("Unsupported Sarvam speaker '%s' - falling back to '%s'", self._voice, speaker)

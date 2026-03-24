@@ -139,7 +139,7 @@ def resolve_ai_configuration(ai_config: Dict[str, Any], metadata_overrides: Opti
             tts_model = SARVAM_PLACEHOLDER_MODEL
         else:
             tts_model = normalize_sarvam_model(str(tts_model))
-        tts_voice = normalize_sarvam_speaker(str(tts_voice))
+        tts_voice = normalize_sarvam_speaker(str(tts_voice), tts_model)
     else:
         tts_provider = "openai"
         tts_model = tts_model or default_config.OPENAI_TTS_MODEL
