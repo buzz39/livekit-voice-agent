@@ -6,6 +6,7 @@ import base64
 import io
 import logging
 import os
+import struct
 import uuid
 import wave
 from typing import Optional
@@ -309,7 +310,7 @@ class _SarvamChunkedStream(ChunkedStream):
 
                     async for chunk in response.aiter_bytes(chunk_size=4096):
                         if chunk:
-                            output_emitter.push(chunk)
+                            output_emitter.push(_mulaw_to_pcm(chunk))
             else:
                 # Fallback: REST endpoint returns base64-encoded WAV
                 response = await client.post(
@@ -345,3 +346,25 @@ def _extract_pcm(audio_bytes: bytes) -> bytes:
 
     with wave.open(io.BytesIO(audio_bytes), "rb") as wav_file:
         return wav_file.readframes(wav_file.getnframes())
+
+
+# --- G.711 µ-law to 16-bit linear PCM conversion ---
+# Precomputed lookup table (ITU-T G.711 standard) avoids per-sample math at
+# runtime.  Each µ-law byte maps to a signed 16-bit linear PCM value.
+
+def _build_mulaw_decode_table() -> list[int]:
+    table = [0] * 256
+    for i in range(256):
+        v = ~i & 0xFF
+        t = ((v & 0x0F) << 3) + 0x84
+        t <<= (v & 0x70) >> 4
+        table[i] = (0x84 - t) if (v & 0x80) else (t - 0x84)
+    return table
+
+
+_MULAW_DECODE = _build_mulaw_decode_table()
+
+
+def _mulaw_to_pcm(data: bytes) -> bytes:
+    """Convert G.711 µ-law encoded bytes to 16-bit signed little-endian PCM."""
+    return struct.pack(f"<{len(data)}h", *(_MULAW_DECODE[b] for b in data))
