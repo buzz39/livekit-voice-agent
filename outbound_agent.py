@@ -15,13 +15,9 @@ from livekit.agents import (
 from livekit.agents.voice.room_io import RoomInputOptions
 from livekit.agents.voice.events import ErrorEvent
 from livekit.agents.llm import LLMError
-from livekit.plugins import noise_cancellation, silero
+from livekit.plugins import noise_cancellation
 from livekit import api
 from livekit import rtc
-
-# Pre-load the Silero VAD model at import time so the first inference
-# inside AgentSession doesn't stall the pipeline for 7-8 seconds.
-_PRELOADED_VAD = silero.VAD.load()
 
 from egress_manager import EgressManager
 from neon_db import get_db
@@ -264,17 +260,15 @@ async def _run_entrypoint(ctx: JobContext):
             logger.warning("call.failed webhook error during provider initialization: %s", dispatch_error)
         return
 
-    # STT-based turn detection paired with Silero VAD for responsive
-    # interruption handling.  preemptive_generation starts LLM+TTS before
-    # turn is fully committed to reduce perceived latency.
-    # min_interruption_words=3 prevents background noise from cutting off
-    # agent speech.
+    # STT-based turn detection via Deepgram handles endpointing.
+    # Silero VAD removed — the container CPU cannot sustain real-time
+    # ONNX inference, causing delays that grow to 8+ seconds and
+    # break interrupt handling.  STT alone is sufficient.
     session = AgentSession(
         turn_detection="stt",
         stt=stt,
         llm=llm,
         tts=tts,
-        vad=_PRELOADED_VAD,
         min_endpointing_delay=0.5,
         max_endpointing_delay=6.0,
         min_interruption_words=3,

@@ -58,11 +58,6 @@ COPY --chown=appuser:appuser . .
 # This improves security by not running as root
 USER appuser
 
-# Pre-download any ML models or files the agent needs
-# Silero VAD ONNX model is loaded at import time; bake it into the image
-# so the first call doesn't pay the download cost.
-RUN uv run python -c "from livekit.plugins import silero; silero.VAD.load()"
-
 # Run the application using UV
 # UV will activate the virtual environment and run the agent.
 # The "start" command tells the worker to connect to LiveKit and begin waiting for jobs.
