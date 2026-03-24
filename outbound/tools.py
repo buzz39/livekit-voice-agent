@@ -98,14 +98,14 @@ def create_tools(
         except Exception as e:
             logger.debug(f"data.captured webhook error: {e}")
 
-        return ""
+        return f"Saved {field}."
 
     @function_tool
     async def add_note(note: str) -> str:
         """Add a general note about the call."""
         call_metadata["notes"].append(note)
         logger.info(f"Note added: {note}")
-        return ""
+        return "Noted."
 
     @function_tool
     async def end_call() -> str:

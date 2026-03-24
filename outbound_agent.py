@@ -19,6 +19,10 @@ from livekit.plugins import noise_cancellation, silero
 from livekit import api
 from livekit import rtc
 
+# Pre-load the Silero VAD model at import time so the first inference
+# inside AgentSession doesn't stall the pipeline for 7-8 seconds.
+_PRELOADED_VAD = silero.VAD.load()
+
 from egress_manager import EgressManager
 from neon_db import get_db
 
@@ -270,7 +274,7 @@ async def _run_entrypoint(ctx: JobContext):
         stt=stt,
         llm=llm,
         tts=tts,
-        vad=silero.VAD.load(),
+        vad=_PRELOADED_VAD,
         min_endpointing_delay=0.5,
         max_endpointing_delay=6.0,
         min_interruption_words=3,

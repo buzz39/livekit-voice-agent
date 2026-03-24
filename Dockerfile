@@ -59,8 +59,9 @@ COPY --chown=appuser:appuser . .
 USER appuser
 
 # Pre-download any ML models or files the agent needs
-# Not needed when using turn_detection="stt" (no local ONNX model required)
-# RUN uv run python outbound_agent.py download-files
+# Silero VAD ONNX model is loaded at import time; bake it into the image
+# so the first call doesn't pay the download cost.
+RUN uv run python -c "from livekit.plugins import silero; silero.VAD.load()"
 
 # Run the application using UV
 # UV will activate the virtual environment and run the agent.
