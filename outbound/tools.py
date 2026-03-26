@@ -132,15 +132,16 @@ def create_tools(
             return f"No stored details found for {phone}."
 
         @function_tool
-        async def transfer_call(destination: Optional[str] = None) -> str:
+        async def transfer_call(destination: str = "") -> str:
             """
             Transfer the live call to a phone number or SIP URI.
 
-            If destination is omitted, the configured default transfer destination is used.
+            Pass the destination phone number or SIP URI as a string.
+            If destination is empty, the configured default transfer destination is used.
             Returns an error message if no destination is configured, the caller cannot be identified,
             or the LiveKit SIP transfer request fails.
             """
-            transfer_target = destination or default_transfer_destination
+            transfer_target = (destination.strip() if destination else "") or default_transfer_destination
             if not transfer_target:
                 return "No transfer destination is configured."
 
