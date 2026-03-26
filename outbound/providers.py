@@ -63,14 +63,18 @@ def resolve_ai_configuration(ai_config: Dict[str, Any], metadata_overrides: Opti
     # Auto-fallback: if the chosen LLM provider's credentials are missing, degrade
     # to a provider that IS configured rather than aborting the call entirely.
     if not _has_credentials(llm_provider):
-        fallback = "openai" if llm_provider != "openai" else "groq"
+        fallback = "groq" if llm_provider != "groq" else "openai"
         if _has_credentials(fallback):
             logger.warning(
                 "LLM provider '%s' credentials missing — falling back to '%s'",
                 llm_provider, fallback,
             )
             llm_provider = fallback
-        # If neither has credentials the downstream validation will still catch it.
+        else:
+            logger.error(
+                "LLM provider '%s' credentials missing and fallback '%s' also missing!",
+                llm_provider, fallback,
+            )
 
     llm_model = (
         _override(metadata_overrides, "llm_model")

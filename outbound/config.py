@@ -95,14 +95,14 @@ async def load_ai_config(db: Any, agent_slug: str = None, agent_config: dict = N
 
     if not ai_config:
         ai_config = {
-            "llm_provider": "openai",
-            "llm_model": "gpt-4o-mini",
+            "llm_provider": "groq",
+            "llm_model": "llama-3.3-70b-versatile",
             "llm_temperature": 0.7,
             "stt_provider": "deepgram",
             "stt_model": "nova-3",
             "stt_language": "en-US",
-            "tts_provider": "openai",
-            "tts_model": "tts-1",
-            "tts_voice": "alloy",
+            "tts_provider": "cartesia",
+            "tts_model": "sonic-2",
+            "tts_voice": "f786b574-daa5-4673-aa0c-cbe3e8534c02",
         }
     return ai_config
