@@ -186,12 +186,18 @@ def build_llm(ai_config: Dict[str, Any], metadata_overrides: Optional[Dict[str, 
                 default_config.GROQ_MODEL,
             )
             model = default_config.GROQ_MODEL
-        logger.info(f"Using Groq LLM: {model}")
+        groq_api_key = os.getenv("GROQ_API_KEY")
+        groq_base_url = os.getenv("GROQ_API_URL", "https://api.groq.com/openai/v1")
+        if not groq_api_key:
+            logger.error("GROQ_API_KEY is NOT set — Groq LLM will fail. Check environment variables.")
+        else:
+            logger.info("GROQ_API_KEY is set (starts with '%s...')", groq_api_key[:8])
+        logger.info(f"Using Groq LLM: model={model}, base_url={groq_base_url}")
         return openai.LLM(
             model=model,
             temperature=temperature,
-            base_url=os.getenv("GROQ_API_URL", "https://api.groq.com/openai/v1"),
-            api_key=os.getenv("GROQ_API_KEY"),
+            base_url=groq_base_url,
+            api_key=groq_api_key,
             _strict_tool_schema=False,  # Groq rejects OpenAI strict-mode schemas for zero-param tools
         )
 
