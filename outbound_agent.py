@@ -518,6 +518,22 @@ async def _run_entrypoint(ctx: JobContext):
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
+
+    # === Startup diagnostics: log provider env vars so we can debug 403s ===
+    _startup_logger = logging.getLogger("outbound-agent.startup")
+    _groq_key = os.getenv("GROQ_API_KEY", "")
+    _openai_key = os.getenv("OPENAI_API_KEY", "")
+    _llm_provider_env = os.getenv("LLM_PROVIDER", "(not set)")
+    _tts_provider_env = os.getenv("TTS_PROVIDER", "(not set)")
+    _startup_logger.info(
+        "ENV CHECK → LLM_PROVIDER=%s, TTS_PROVIDER=%s, GROQ_API_KEY=%s, OPENAI_API_KEY=%s",
+        _llm_provider_env,
+        _tts_provider_env,
+        f"set ({_groq_key[:8]}...)" if _groq_key else "NOT SET",
+        f"set ({_openai_key[:8]}...)" if _openai_key else "NOT SET",
+    )
+    # ======================================================================
+
     # Set default load threshold to 0.9 to avoid flapping in dev/high-load envs
     # Note: Ensure this is a valid float string.
     # os.environ.setdefault("LIVEKIT_WORKER_LOAD_THRESHOLD", "0.9")
