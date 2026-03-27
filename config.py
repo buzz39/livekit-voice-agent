@@ -14,7 +14,7 @@ DEFAULT_STT_PROVIDER = os.getenv("DEFAULT_STT_PROVIDER", "deepgram")
 DEFAULT_STT_MODEL = os.getenv("DEFAULT_STT_MODEL", "nova-3")
 DEFAULT_STT_LANGUAGE = os.getenv("DEFAULT_STT_LANGUAGE", "en-US")
 
-_tts_provider_default = os.getenv("TTS_PROVIDER", "openai")
+_tts_provider_default = os.getenv("TTS_PROVIDER", "sarvam")
 DEFAULT_TTS_PROVIDER = os.getenv("DEFAULT_TTS_PROVIDER", _tts_provider_default)
 OPENAI_TTS_MODEL = os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
 OPENAI_TTS_VOICE = os.getenv("OPENAI_TTS_VOICE", "alloy")

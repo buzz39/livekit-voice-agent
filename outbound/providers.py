@@ -112,7 +112,7 @@ def resolve_ai_configuration(ai_config: Dict[str, Any], metadata_overrides: Opti
 
     # Auto-fallback for TTS provider as well
     if not _has_credentials(tts_provider):
-        fallback = "openai" if tts_provider != "openai" else "cartesia"
+        fallback = "sarvam" if tts_provider != "sarvam" else "openai"
         if _has_credentials(fallback):
             logger.warning(
                 "TTS provider '%s' credentials missing — falling back to '%s'",
@@ -203,6 +203,7 @@ def build_llm(ai_config: Dict[str, Any], metadata_overrides: Optional[Dict[str, 
             base_url=groq_base_url,
             api_key=groq_api_key,
             _strict_tool_schema=False,  # Groq rejects OpenAI strict-mode schemas for zero-param tools
+            parallel_tool_calls=False,  # Groq generates malformed tool names with parallel calls
         )
 
     # OpenAI (default) — fix model if it's a leftover Groq model name after fallback

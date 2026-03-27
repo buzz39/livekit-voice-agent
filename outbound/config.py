@@ -101,8 +101,8 @@ async def load_ai_config(db: Any, agent_slug: str = None, agent_config: dict = N
             "stt_provider": "deepgram",
             "stt_model": "nova-3",
             "stt_language": "en-US",
-            "tts_provider": "cartesia",
-            "tts_model": "sonic-2",
-            "tts_voice": "f786b574-daa5-4673-aa0c-cbe3e8534c02",
+            "tts_provider": "sarvam",
+            "tts_model": "bulbul:v3",
+            "tts_voice": "shubh",
         }
     return ai_config
