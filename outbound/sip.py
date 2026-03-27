@@ -2,7 +2,8 @@ import os
 import re
 import asyncio
 import logging
-from livekit.protocol.sip import CreateSIPParticipantRequest
+from datetime import timedelta
+from livekit.protocol.sip import CreateSIPParticipantRequest, SIPMediaEncryption
 from typing import Optional
 
 from livekit.agents.utils.participant import wait_for_participant
@@ -39,6 +40,8 @@ async def dial_participant(ctx, phone_number: str, business_name: str, dispatche
     """
     sip_trunk_id = os.getenv("LIVEKIT_OUTBOUND_TRUNK_ID") or os.getenv("SIP_TRUNK_ID")
     sip_from_number = from_number or os.getenv("SIP_FROM_NUMBER")
+    ringing_timeout = timedelta(seconds=int(os.getenv("SIP_RINGING_TIMEOUT", "30")))
+    max_call_duration = timedelta(seconds=int(os.getenv("SIP_MAX_CALL_DURATION", "600")))
 
     if not sip_trunk_id:
         logger.error("LIVEKIT_OUTBOUND_TRUNK_ID (or SIP_TRUNK_ID) not set in env")
@@ -78,6 +81,9 @@ async def dial_participant(ctx, phone_number: str, business_name: str, dispatche
                 participant_name=business_name,
                 wait_until_answered=True,
                 krisp_enabled=True,
+                ringing_timeout=ringing_timeout,
+                max_call_duration=max_call_duration,
+                media_encryption=SIPMediaEncryption.SIP_MEDIA_ENCRYPT_ALLOW,
             )
         )
         logger.info("Call answered or dialing request accepted")

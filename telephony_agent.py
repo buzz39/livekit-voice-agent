@@ -26,9 +26,10 @@ from livekit.agents import (
     get_job_context,
 )
 from livekit.agents.llm import function_tool, LLMError
-from livekit.agents.voice.room_io import RoomInputOptions
+from livekit.agents.voice.room_io import RoomInputOptions, RoomOutputOptions
 from livekit.agents.voice.events import ErrorEvent
 from livekit.plugins import noise_cancellation
+from livekit import rtc
 from mcp_integration import load_mcp_tools
 from neon_db import get_db
 from outbound.providers import (
@@ -213,6 +214,10 @@ async def entrypoint(ctx: JobContext):
         stt=stt,
         llm=llm,
         tts=tts,
+        min_endpointing_delay=0.5,
+        max_endpointing_delay=6.0,
+        min_interruption_words=3,
+        preemptive_generation=True,
     )
 
     # Handle LLM/TTS errors gracefully: speak a fallback message instead of
@@ -232,12 +237,21 @@ async def entrypoint(ctx: JobContext):
                 logger.warning("Failed to speak LLM error fallback message")
 
     # Start the agent session with telephony-optimized noise cancellation
+    # and Opus-optimized audio output (DTX + RED for jitter/packet-loss resilience)
     call_start_time = datetime.datetime.now()
     await session.start(
         agent=agent,
         room=ctx.room,
         room_input_options=RoomInputOptions(
             noise_cancellation=noise_cancellation.BVCTelephony(),
+        ),
+        room_output_options=RoomOutputOptions(
+            audio_sample_rate=48000,
+            audio_publish_options=rtc.TrackPublishOptions(
+                dtx=True,
+                red=True,
+                source=rtc.TrackSource.SOURCE_MICROPHONE,
+            ),
         ),
     )
     

@@ -112,9 +112,9 @@ def test_official_sarvam_tts_default_sample_rate_is_22050():
     assert tts.sample_rate == 22050
 
 
-def test_sarvam_sample_rate_constant_is_8000():
-    """PSTN requires 8kHz - our constant must match."""
-    assert SARVAM_SAMPLE_RATE == 8000
+def test_sarvam_sample_rate_constant_is_24000():
+    """Wideband 24kHz for high-quality Opus encoding via LiveKit."""
+    assert SARVAM_SAMPLE_RATE == 24000
 
 
 def test_normalize_sarvam_language_maps_aliases_to_supported_codes():

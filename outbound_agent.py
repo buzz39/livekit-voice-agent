@@ -12,7 +12,7 @@ from livekit.agents import (
     get_job_context,
     metrics,
 )
-from livekit.agents.voice.room_io import RoomInputOptions
+from livekit.agents.voice.room_io import RoomInputOptions, RoomOutputOptions
 from livekit.agents.voice.events import ErrorEvent
 from livekit.agents.llm import LLMError
 from livekit.plugins import noise_cancellation
@@ -327,6 +327,14 @@ async def _run_entrypoint(ctx: JobContext):
                 room_input_options=RoomInputOptions(
                     noise_cancellation=noise_cancellation.BVCTelephony(),
                     close_on_disconnect=False,
+                ),
+                room_output_options=RoomOutputOptions(
+                    audio_sample_rate=48000,
+                    audio_publish_options=rtc.TrackPublishOptions(
+                        dtx=True,
+                        red=True,
+                        source=rtc.TrackSource.SOURCE_MICROPHONE,
+                    ),
                 ),
             )
         except Exception as e:
