@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 import boto3
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from livekit import api
 from livekit.protocol.room import CreateRoomRequest
 from dotenv import load_dotenv
@@ -64,27 +64,116 @@ app.add_middleware(
 # --- API Key Authentication ---
 API_SECRET_KEY = os.getenv("API_SECRET_KEY", "")
 
-async def verify_api_key(request: Request):
-    """Verify API key from Authorization header or x-api-key header.
-    Skips auth if API_SECRET_KEY is not configured (dev mode)."""
-    if not API_SECRET_KEY:
-        return  # No key configured — dev mode, allow all
-    # Allow health endpoint without auth
-    if request.url.path == "/health":
-        return
+_ROLE_LEVELS = {"viewer": 1, "operator": 2, "admin": 3}
+
+
+def _parse_tenant_api_key_map() -> dict[str, str]:
+    raw = os.getenv("TENANT_API_KEYS_JSON", "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except Exception as exc:
+        logger.error("Invalid TENANT_API_KEYS_JSON: %s", exc)
+        return {}
+    if not isinstance(parsed, dict):
+        logger.error("TENANT_API_KEYS_JSON must be an object of tenant_id to api_key")
+        return {}
+    out: dict[str, str] = {}
+    for tenant_id, tenant_key in parsed.items():
+        if isinstance(tenant_id, str) and tenant_id.strip() and isinstance(tenant_key, str) and tenant_key.strip():
+            out[tenant_id.strip()] = tenant_key.strip()
+    return out
+
+
+_TENANT_API_KEYS = _parse_tenant_api_key_map()
+
+
+def _extract_request_api_key(request: Request) -> str:
     key = request.headers.get("x-api-key") or ""
     auth_header = request.headers.get("authorization", "")
     if auth_header.startswith("Bearer "):
         key = key or auth_header[7:]
+    return key
+
+
+def _check_dashboard_rbac(request: Request) -> None:
+    if not os.getenv("RBAC_ENFORCED", "false").lower() in {"1", "true", "yes", "on"}:
+        return
+    path = request.url.path
+    if not path.startswith("/dashboard"):
+        return
+
+    role = (request.headers.get("x-role") or "viewer").strip().lower()
+    role_level = _ROLE_LEVELS.get(role)
+    if role_level is None:
+        raise HTTPException(status_code=403, detail="Invalid role")
+
+    required_level = 1
+    if request.method in {"POST", "PATCH", "DELETE", "PUT"}:
+        required_level = 2
+
+    admin_only_prefixes = (
+        "/dashboard/agent",
+        "/dashboard/ai-config",
+        "/dashboard/agents",
+        "/dashboard/ai-configs",
+    )
+    if request.method in {"DELETE", "PUT"} and path.startswith(admin_only_prefixes):
+        required_level = 3
+
+    if role_level < required_level:
+        raise HTTPException(status_code=403, detail="Insufficient role permissions")
+
+
+async def _check_tenant_api_key(request: Request) -> None:
+    tenant_id = (request.headers.get("x-tenant-id") or "").strip()
+    if not tenant_id:
+        return
+
+    expected = _TENANT_API_KEYS.get(tenant_id)
+    if expected is None and db_instance:
+        try:
+            expected = await db_instance.get_tenant_api_key(tenant_id)
+        except Exception as exc:
+            logger.warning("Failed to load tenant API key for %s: %s", tenant_id, exc)
+
+    if expected is None:
+        # No tenant key configured in env or DB.
+        return
+
+    if not expected:
+        raise HTTPException(status_code=401, detail="Unknown tenant")
+
+    presented = (request.headers.get("x-tenant-api-key") or "").strip() or _extract_request_api_key(request)
+    if presented != expected:
+        raise HTTPException(status_code=401, detail="Invalid tenant API key")
+
+async def verify_api_key(request: Request):
+    """Verify API key from Authorization header or x-api-key header.
+    Skips auth if API_SECRET_KEY is not configured (dev mode)."""
+    if not API_SECRET_KEY:
+        await _check_tenant_api_key(request)
+        _check_dashboard_rbac(request)
+        return  # No global key configured — dev mode, still enforce optional tenant/RBAC rules
+    # Allow health endpoint without auth
+    if request.url.path == "/health":
+        return
+    key = _extract_request_api_key(request)
     if key != API_SECRET_KEY:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+    await _check_tenant_api_key(request)
+    _check_dashboard_rbac(request)
 
 # --- Simple Rate Limiter ---
 _RATE_LIMIT_WINDOW = 60  # seconds
 _RATE_LIMIT_MAX = int(os.getenv("RATE_LIMIT_MAX_CALLS_PER_MIN", "10"))
+_RATE_LIMIT_TENANT_MAX = int(os.getenv("RATE_LIMIT_MAX_CALLS_PER_MIN_PER_TENANT", "60"))
 _call_timestamps: dict[str, list[float]] = defaultdict(list)
+_tenant_call_timestamps: dict[str, list[float]] = defaultdict(list)
 
-def _check_rate_limit(client_ip: str):
+def _check_rate_limit(client_ip: str, tenant_id: Optional[str] = None):
     """Raise 429 if the client exceeds the outbound call rate limit."""
     now = time.time()
     timestamps = _call_timestamps[client_ip]
@@ -93,6 +182,13 @@ def _check_rate_limit(client_ip: str):
     if len(_call_timestamps[client_ip]) >= _RATE_LIMIT_MAX:
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again shortly.")
     _call_timestamps[client_ip].append(now)
+
+    if tenant_id:
+        tenant_timestamps = _tenant_call_timestamps[tenant_id]
+        _tenant_call_timestamps[tenant_id] = [t for t in tenant_timestamps if now - t < _RATE_LIMIT_WINDOW]
+        if len(_tenant_call_timestamps[tenant_id]) >= _RATE_LIMIT_TENANT_MAX:
+            raise HTTPException(status_code=429, detail="Tenant rate limit exceeded. Try again shortly.")
+        _tenant_call_timestamps[tenant_id].append(now)
 
 # Configuration
 ROOM_NAME_PREFIX = "outbound-call-"
@@ -115,12 +211,23 @@ def _rewrite_recording_url(call: dict) -> None:
             else f"/dashboard/audio/{call_id}"
         )
 
+
+def _normalize_call_payload(call: dict) -> None:
+    """Normalize API payload fields for dashboard consumers."""
+    captured_data = call.get("captured_data")
+    if isinstance(captured_data, str):
+        try:
+            call["captured_data"] = json.loads(captured_data)
+        except json.JSONDecodeError:
+            pass
+
 class OutboundCallRequest(BaseModel):
     phone_number: str
     business_name: str
     agent_slug: str = "roofing_agent"
     provider: Optional[str] = None # 'twilio' or 'telnyx' or default/sip
     from_number: Optional[str] = None  # Caller ID / FROM number in E.164 format
+    tenant_id: Optional[str] = None
 
     @field_validator("phone_number")
     @classmethod
@@ -139,6 +246,67 @@ class OutboundCallRequest(BaseModel):
                 "from_number must be in E.164 format (e.g. +14155552671)"
             )
         return v
+
+    @field_validator("tenant_id")
+    @classmethod
+    def validate_tenant_id(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        tenant = v.strip()
+        if not tenant:
+            return None
+        if len(tenant) > 64:
+            raise ValueError("tenant_id must be <= 64 characters")
+        return tenant
+
+
+def _resolve_tenant_id(request: Request, body_tenant_id: Optional[str]) -> Optional[str]:
+    """Resolve tenant ID from request body or X-Tenant-Id header.
+
+    If both are present and differ, reject the request to avoid cross-tenant confusion.
+    """
+    header_tenant_id = (request.headers.get("x-tenant-id") or "").strip() or None
+    if body_tenant_id and header_tenant_id and body_tenant_id != header_tenant_id:
+        raise HTTPException(
+            status_code=400,
+            detail="tenant_id in request body does not match X-Tenant-Id header",
+        )
+    return body_tenant_id or header_tenant_id
+
+
+def _matches_tenant(call: dict, tenant_id: Optional[str]) -> bool:
+    """Return True when the call belongs to the requested tenant.
+
+    Calls without captured tenant metadata are only visible when tenant_id is omitted.
+    """
+    if not tenant_id:
+        return True
+    captured_data = call.get("captured_data")
+    if not isinstance(captured_data, dict):
+        return False
+    return captured_data.get("tenant_id") == tenant_id
+
+
+def _extract_call_diagnostics(call: dict) -> dict:
+    """Return compact reliability diagnostics from call payload."""
+    captured_data = call.get("captured_data")
+    captured = captured_data if isinstance(captured_data, dict) else {}
+    state_machine = captured.get("state_machine") if isinstance(captured.get("state_machine"), dict) else {}
+    diagnostics = {
+        "call_id": call.get("id"),
+        "call_status": call.get("call_status"),
+        "duration_seconds": call.get("duration_seconds"),
+        "created_at": call.get("created_at"),
+        "tenant_id": captured.get("tenant_id"),
+        "state_machine": {
+            "current_state": state_machine.get("current_state"),
+            "transitions": state_machine.get("transitions", []),
+        },
+        "dial_attempts": captured.get("dial_attempts", []),
+        "successful_trunk_id": captured.get("successful_trunk_id"),
+        "notes": captured.get("notes", []),
+    }
+    return diagnostics
 
 class PromptUpdateRequest(BaseModel):
     name: str = "roofing_agent"
@@ -170,6 +338,28 @@ class AgentConfigUpsertRequest(BaseModel):
     is_active: bool = True
     prompt_id: Optional[int] = None
     ai_config_name: Optional[str] = None
+
+
+class TenantConfigUpsertRequest(BaseModel):
+    tenant_id: str
+    display_name: str = ""
+    agent_slug: str = ""
+    workflow_policy: str = ""
+    routing_policy: dict = Field(default_factory=dict)
+    ai_overrides: dict = Field(default_factory=dict)
+    opening_line: str = ""
+    api_key: Optional[str] = None
+    is_active: bool = True
+
+    @field_validator("tenant_id")
+    @classmethod
+    def validate_tenant_id(cls, v: str) -> str:
+        tenant = v.strip()
+        if not tenant:
+            raise ValueError("tenant_id is required")
+        if len(tenant) > 64:
+            raise ValueError("tenant_id must be <= 64 characters")
+        return tenant
 
 class DataSchemaFieldRequest(BaseModel):
     slug: str
@@ -219,7 +409,9 @@ async def initiate_outbound_call(request: OutboundCallRequest):
         logger.error("Missing LiveKit credentials")
         return
 
-    room_name = f"{ROOM_NAME_PREFIX}{request.phone_number.replace('+', '')}"
+    phone_suffix = re.sub(r"\D", "", request.phone_number) or "unknown"
+    unique_suffix = int(time.time() * 1000)
+    room_name = f"{ROOM_NAME_PREFIX}{phone_suffix}-{unique_suffix}"
 
     async with api.LiveKitAPI(url=lk_url, api_key=lk_key, api_secret=lk_secret) as lk:
         # Build metadata dict shared by room and dispatch
@@ -228,6 +420,8 @@ async def initiate_outbound_call(request: OutboundCallRequest):
             "business_name": request.business_name,
             "agent_slug": request.agent_slug,
         }
+        if request.tenant_id:
+            call_metadata["tenant_id"] = request.tenant_id
         if request.from_number:
             call_metadata["from_number"] = request.from_number
 
@@ -341,13 +535,16 @@ async def trigger_outbound_call(request: OutboundCallRequest, background_tasks: 
     if not request.phone_number:
         raise HTTPException(status_code=400, detail="Phone number is required")
 
-    # Rate limit by client IP
+    tenant_id = _resolve_tenant_id(req, request.tenant_id)
+
+    # Rate limit by client IP and optional tenant
     client_ip = req.client.host if req.client else "unknown"
-    _check_rate_limit(client_ip)
+    _check_rate_limit(client_ip, tenant_id=tenant_id)
+    effective_request = request.model_copy(update={"tenant_id": tenant_id})
 
     logger.info(f"Received outbound call request for {request.phone_number} ({request.business_name})")
     
-    background_tasks.add_task(initiate_outbound_call, request)
+    background_tasks.add_task(initiate_outbound_call, effective_request)
     
     return {
         "status": "queued",
@@ -356,26 +553,28 @@ async def trigger_outbound_call(request: OutboundCallRequest, background_tasks: 
     }
 
 @app.get("/dashboard/stats", dependencies=[Depends(verify_api_key)])
-async def get_dashboard_stats():
+async def get_dashboard_stats(request: Request, days: int = 7, tenant_id: Optional[str] = None):
     """Get dashboard statistics."""
     if not db_instance:
         raise HTTPException(status_code=503, detail="Database not available")
 
     try:
-        stats = await db_instance.get_call_stats(days=7)
+        resolved_tenant_id = _resolve_tenant_id(request, tenant_id)
+        stats = await db_instance.get_call_stats(days=days, tenant_id=resolved_tenant_id)
         return stats
     except Exception as e:
         logger.error(f"Error fetching stats: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/dashboard/analytics/volume", dependencies=[Depends(verify_api_key)])
-async def get_analytics_volume(days: int = 30):
+async def get_analytics_volume(request: Request, days: int = 30, tenant_id: Optional[str] = None):
     """Get daily call volume for analytics."""
     if not db_instance:
         raise HTTPException(status_code=503, detail="Database not available")
 
     try:
-        data = await db_instance.get_daily_call_volume(days=days)
+        resolved_tenant_id = _resolve_tenant_id(request, tenant_id)
+        data = await db_instance.get_daily_call_volume(days=days, tenant_id=resolved_tenant_id)
         return data
     except Exception as e:
         logger.error(f"Error fetching analytics volume: {e}")
@@ -527,6 +726,73 @@ async def delete_agent(slug: str):
         return {"status": "deleted"}
     except Exception as e:
         logger.error(f"Error deleting agent {slug}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# --- Tenant Config endpoints ---
+
+@app.get("/dashboard/tenants", dependencies=[Depends(verify_api_key)])
+async def get_all_tenants(active_only: bool = False, limit: int = 200):
+    """List tenant configurations."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        return await db_instance.get_all_tenant_configs(active_only=active_only, limit=limit)
+    except Exception as e:
+        logger.error(f"Error fetching tenants: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/dashboard/tenant/{tenant_id}", dependencies=[Depends(verify_api_key)])
+async def get_tenant(tenant_id: str):
+    """Get a single tenant configuration by tenant_id."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        tenant = await db_instance.get_tenant_config(tenant_id)
+        if not tenant:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+        return tenant
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching tenant {tenant_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/dashboard/tenants", dependencies=[Depends(verify_api_key)])
+async def upsert_tenant(request: TenantConfigUpsertRequest):
+    """Create or update tenant configuration."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        tenant_id = await db_instance.upsert_tenant_config(
+            tenant_id=request.tenant_id,
+            display_name=request.display_name,
+            agent_slug=request.agent_slug,
+            workflow_policy=request.workflow_policy,
+            routing_policy=request.routing_policy,
+            ai_overrides=request.ai_overrides,
+            opening_line=request.opening_line,
+            api_key=request.api_key,
+            is_active=request.is_active,
+        )
+        return {"status": "ok", "tenant_id": tenant_id}
+    except Exception as e:
+        logger.error(f"Error upserting tenant {request.tenant_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.delete("/dashboard/tenant/{tenant_id}", dependencies=[Depends(verify_api_key)])
+async def delete_tenant(tenant_id: str):
+    """Delete tenant configuration."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+    try:
+        await db_instance.delete_tenant_config(tenant_id)
+        return {"status": "deleted"}
+    except Exception as e:
+        logger.error(f"Error deleting tenant {tenant_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 # --- Data Schema endpoints ---
@@ -836,25 +1102,86 @@ def generate_presigned_url(recording_url: str, expiration=3600) -> Optional[str]
         return recording_url
 
 @app.get("/dashboard/calls", dependencies=[Depends(verify_api_key)])
-async def get_dashboard_calls(limit: int = 10):
+async def get_dashboard_calls(request: Request, limit: int = 10, tenant_id: Optional[str] = None):
     """Get recent calls."""
     if not db_instance:
         raise HTTPException(status_code=503, detail="Database not available")
 
     try:
         calls = await db_instance.get_recent_calls(limit=limit)
+        resolved_tenant_id = _resolve_tenant_id(request, tenant_id)
         # Rewrite recording URLs to point to our proxy
         # This fixes issues where the frontend (local) cannot access the S3/MinIO endpoint (internal docker)
         # or avoids CORS/Presigning issues entirely.
+        filtered_calls = []
         for call in calls:
-            _rewrite_recording_url(call)
-        return calls
+            _normalize_call_payload(call)
+            if _matches_tenant(call, resolved_tenant_id):
+                _rewrite_recording_url(call)
+                filtered_calls.append(call)
+        return filtered_calls
     except Exception as e:
         logger.error(f"Error fetching calls: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
+@app.get("/dashboard/calls/by-tenant", dependencies=[Depends(verify_api_key)])
+async def get_dashboard_calls_by_tenant(
+    request: Request,
+    limit: int = 100,
+    tenant_id: Optional[str] = None,
+):
+    """Get recent calls filtered by tenant.
+
+    tenant_id can be supplied via query param or X-Tenant-Id header.
+    """
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    resolved_tenant_id = _resolve_tenant_id(request, tenant_id)
+    if not resolved_tenant_id:
+        raise HTTPException(status_code=400, detail="tenant_id is required")
+
+    try:
+        calls = await db_instance.get_recent_calls(limit=limit)
+        filtered_calls = []
+        for call in calls:
+            _normalize_call_payload(call)
+            if _matches_tenant(call, resolved_tenant_id):
+                _rewrite_recording_url(call)
+                filtered_calls.append(call)
+        return filtered_calls
+    except Exception as e:
+        logger.error(f"Error fetching tenant calls: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/dashboard/call/{call_id}/diagnostics", dependencies=[Depends(verify_api_key)])
+async def get_call_diagnostics(call_id: int, request: Request, tenant_id: Optional[str] = None):
+    """Return compact reliability diagnostics for a specific call."""
+    if not db_instance:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    resolved_tenant_id = _resolve_tenant_id(request, tenant_id)
+
+    try:
+        call = await db_instance.get_call(call_id)
+        if not call:
+            raise HTTPException(status_code=404, detail="Call not found")
+
+        _normalize_call_payload(call)
+        if resolved_tenant_id and not _matches_tenant(call, resolved_tenant_id):
+            raise HTTPException(status_code=404, detail="Call not found")
+
+        return _extract_call_diagnostics(call)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching call diagnostics for {call_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 @app.get("/dashboard/call/{call_id}", dependencies=[Depends(verify_api_key)])
-async def get_call_details(call_id: int):
+async def get_call_details(call_id: int, request: Request, tenant_id: Optional[str] = None):
     """Get details for a specific call, including transcript."""
     if not db_instance:
         raise HTTPException(status_code=503, detail="Database not available")
@@ -864,6 +1191,10 @@ async def get_call_details(call_id: int):
         if not call:
              raise HTTPException(status_code=404, detail="Call not found")
 
+        _normalize_call_payload(call)
+        resolved_tenant_id = _resolve_tenant_id(request, tenant_id)
+        if resolved_tenant_id and not _matches_tenant(call, resolved_tenant_id):
+            raise HTTPException(status_code=404, detail="Call not found")
         _rewrite_recording_url(call)
 
         return call
@@ -897,6 +1228,27 @@ async def health_check():
         health["database"] = "not_configured"
         health["status"] = "degraded"
     return health
+
+
+@app.get("/health/startup")
+async def startup_health_check():
+    """Report startup-critical configuration checks for API and telephony path."""
+    required = ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "NEON_DATABASE_URL"]
+    optional_recommended = ["SIP_TRUNK_ID", "LIVEKIT_OUTBOUND_TRUNK_ID", "SARVAM_API_KEY", "GROQ_API_KEY"]
+
+    missing_required = [name for name in required if not os.getenv(name)]
+    missing_recommended = [name for name in optional_recommended if not os.getenv(name)]
+
+    return {
+        "status": "ok" if not missing_required else "degraded",
+        "missing_required": missing_required,
+        "missing_recommended": missing_recommended,
+        "cors_allowed_origins": _cors_origins,
+        "rate_limit_per_min": _RATE_LIMIT_MAX,
+        "tenant_rate_limit_per_min": _RATE_LIMIT_TENANT_MAX,
+        "rbac_enforced": os.getenv("RBAC_ENFORCED", "false").lower() in {"1", "true", "yes", "on"},
+        "tenant_api_keys_loaded": len(_TENANT_API_KEYS),
+    }
 
 if __name__ == "__main__":
     import uvicorn

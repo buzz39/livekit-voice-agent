@@ -44,6 +44,11 @@ def create_tools(
 
     normalized_phone_number = _normalize_phone_number(phone_number)
 
+    if not isinstance(call_metadata.get("tool_events"), list):
+        call_metadata["tool_events"] = []
+    if not isinstance(call_metadata.get("idempotency_keys"), dict):
+        call_metadata["idempotency_keys"] = {}
+
     def _format_transfer_destination(destination: str) -> str:
         clean_destination = destination.strip()
         if "@" in clean_destination:
@@ -71,9 +76,34 @@ def create_tools(
                     return participant.identity
         return None
 
+    async def _record_tool_event(tool_name: str, payload: Dict[str, Any], idempotency_key: str = "") -> None:
+        event = {
+            "tool": tool_name,
+            "at": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
+            "payload": payload,
+            "contact_id": contact_id,
+            "phone_number": phone_number,
+            "idempotency_key": idempotency_key or None,
+        }
+        call_metadata["tool_events"].append(event)
+        try:
+            await dispatcher.dispatch("tool.called", event)
+        except Exception as exc:
+            logger.debug("tool.called webhook dispatch failed: %s", exc)
+
+    def _check_idempotency(tool_name: str, idempotency_key: str) -> bool:
+        if not idempotency_key:
+            return False
+        idempotency_index: Dict[str, List[str]] = call_metadata.get("idempotency_keys", {})
+        seen_keys = idempotency_index.setdefault(tool_name, [])
+        if idempotency_key in seen_keys:
+            return True
+        seen_keys.append(idempotency_key)
+        return False
+
     @function_tool
-    async def get_current_time() -> str:
-        """Get the current time."""
+    async def get_current_time(timezone: str = "local") -> str:
+        """Get the current time. Pass timezone='local' or leave empty for local time."""
         return f"The current time is {datetime.datetime.now().strftime('%I:%M %p')}"
 
     @function_tool
@@ -105,32 +135,115 @@ def create_tools(
         """Add a general note about the call."""
         call_metadata["notes"].append(note)
         logger.info(f"Note added: {note}")
+        await _record_tool_event("add_note", {"note": note})
         return "Noted."
 
     @function_tool
-    async def end_call() -> str:
+    async def create_appointment(
+        customer_name: str,
+        appointment_time: str,
+        purpose: str = "",
+        idempotency_key: str = "",
+    ) -> str:
+        """Create an appointment record with validation and audit trail.
+
+        appointment_time must be an ISO datetime string.
+        """
+        if not customer_name.strip():
+            return "customer_name is required."
+        try:
+            datetime.datetime.fromisoformat(appointment_time.replace("Z", "+00:00"))
+        except ValueError:
+            return "appointment_time must be ISO format, for example 2026-03-30T10:30:00+05:30"
+
+        if _check_idempotency("create_appointment", idempotency_key):
+            return "Appointment request already processed."
+
+        payload = {
+            "customer_name": customer_name.strip(),
+            "appointment_time": appointment_time,
+            "purpose": purpose.strip(),
+        }
+        appointments = call_metadata.setdefault("appointments", [])
+        appointments.append(payload)
+        await _record_tool_event("create_appointment", payload, idempotency_key=idempotency_key)
+        try:
+            await dispatcher.dispatch("appointment.created", {**payload, "contact_id": contact_id, "phone_number": phone_number})
+        except Exception as exc:
+            logger.debug("appointment.created webhook dispatch failed: %s", exc)
+        return "Appointment created."
+
+    @function_tool
+    async def capture_lead(
+        lead_name: str,
+        email: str = "",
+        intent: str = "",
+        budget: str = "",
+        idempotency_key: str = "",
+    ) -> str:
+        """Capture lead details for CRM or downstream qualification workflows."""
+        if not lead_name.strip():
+            return "lead_name is required."
+        if email and "@" not in email:
+            return "email must be valid."
+
+        if _check_idempotency("capture_lead", idempotency_key):
+            return "Lead capture request already processed."
+
+        payload = {
+            "lead_name": lead_name.strip(),
+            "email": email.strip(),
+            "intent": intent.strip(),
+            "budget": budget.strip(),
+        }
+        call_metadata["lead"] = payload
+        await _record_tool_event("capture_lead", payload, idempotency_key=idempotency_key)
+        try:
+            await dispatcher.dispatch("lead.captured", {**payload, "contact_id": contact_id, "phone_number": phone_number})
+        except Exception as exc:
+            logger.debug("lead.captured webhook dispatch failed: %s", exc)
+        return "Lead captured."
+
+    @function_tool
+    async def push_crm_note(note: str, system: str = "generic-crm", idempotency_key: str = "") -> str:
+        """Push a structured note to CRM-integrated webhook workflow."""
+        if not note.strip():
+            return "note is required."
+
+        if _check_idempotency("push_crm_note", idempotency_key):
+            return "CRM note already pushed."
+
+        payload = {
+            "note": note.strip(),
+            "system": system.strip() or "generic-crm",
+        }
+        await _record_tool_event("push_crm_note", payload, idempotency_key=idempotency_key)
+        try:
+            await dispatcher.dispatch("crm.note", {**payload, "contact_id": contact_id, "phone_number": phone_number})
+        except Exception as exc:
+            logger.debug("crm.note webhook dispatch failed: %s", exc)
+        return "CRM note pushed."
+
+    @function_tool
+    async def end_call(reason: str = "conversation_complete") -> str:
         """Terminates the call. Call this IMMEDIATELY after saying goodbye. Do not wait for the user to hang up."""
-        logger.info("Agent requested end_call")
+        logger.info(f"Agent requested end_call (reason={reason})")
         # Immediate hangup to prevent dead air.
         # The 'disconnected' event will trigger finalize_call() for data persistence.
         asyncio.create_task(hangup_callback())
         return ""
 
-    tools = [get_current_time, update_call_data, add_note, end_call]
+    tools = [
+        get_current_time,
+        update_call_data,
+        add_note,
+        create_appointment,
+        capture_lead,
+        push_crm_note,
+        end_call,
+    ]
 
     if ctx:
-        @function_tool
-        async def lookup_user(phone: str) -> str:
-            """
-            Return current-call business details when the provided phone matches the active caller.
-
-            If the phone does not match the current call, returns a simple "not found" message.
-            """
-            if _normalize_phone_number(phone) == normalized_phone_number:
-                business_name = call_metadata.get("business_name") or "Unknown business"
-                return f"User found for {phone}: business={business_name}, contact_id={contact_id}."
-            return f"No stored details found for {phone}."
-
         @function_tool
         async def transfer_call(destination: str = "") -> str:
             """
@@ -166,6 +279,6 @@ def create_tools(
                 logger.exception(f"Transfer failed: {e}")
                 return f"Error executing transfer: {e}"
 
-        tools.extend([lookup_user, transfer_call])
+        tools.append(transfer_call)
 
     return tools

@@ -45,9 +45,13 @@ async function apiFetch(path, options = {}) {
   return response;
 }
 
-export async function getStats() {
+export async function getStats(days = 7, tenantId = null) {
   try {
-    const response = await apiFetch('/dashboard/stats');
+    const params = new URLSearchParams({ days: String(days) });
+    if (tenantId) {
+      params.set('tenant_id', tenantId);
+    }
+    const response = await apiFetch(`/dashboard/stats?${params.toString()}`);
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     return await response.json();
   } catch (error) {
@@ -57,9 +61,13 @@ export async function getStats() {
   }
 }
 
-export async function getAnalyticsVolume(days = 30) {
+export async function getAnalyticsVolume(days = 30, tenantId = null) {
   try {
-    const response = await apiFetch(`/dashboard/analytics/volume?days=${days}`);
+    const params = new URLSearchParams({ days: String(days) });
+    if (tenantId) {
+      params.set('tenant_id', tenantId);
+    }
+    const response = await apiFetch(`/dashboard/analytics/volume?${params.toString()}`);
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     return await response.json();
   } catch (error) {
@@ -69,9 +77,13 @@ export async function getAnalyticsVolume(days = 30) {
   }
 }
 
-export async function getRecentCalls(limit = 10) {
+export async function getRecentCalls(limit = 10, tenantId = null) {
   try {
-    const response = await apiFetch(`/dashboard/calls?limit=${limit}`);
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (tenantId) {
+      params.set('tenant_id', tenantId);
+    }
+    const response = await apiFetch(`/dashboard/calls?${params.toString()}`);
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const data = await response.json();
     return data.map(call => {
@@ -163,7 +175,7 @@ export async function saveAgentConfig(config) {
   return await response.json();
 }
 
-export async function startOutboundCall(phoneNumber, businessName = "Default Business", agentSlug = "default_roofing_agent", fromNumber = null) {
+export async function startOutboundCall(phoneNumber, businessName = "Default Business", agentSlug = "default_roofing_agent", fromNumber = null, tenantId = null) {
   try {
     const body = {
       phone_number: phoneNumber,
@@ -173,8 +185,12 @@ export async function startOutboundCall(phoneNumber, businessName = "Default Bus
     if (fromNumber) {
       body.from_number = fromNumber;
     }
+    if (tenantId) {
+      body.tenant_id = tenantId;
+    }
     const response = await apiFetch('/outbound-call', {
       method: 'POST',
+      headers: tenantId ? { 'x-tenant-id': tenantId } : undefined,
       body: JSON.stringify(body),
     });
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
@@ -262,6 +278,35 @@ export async function upsertAgent(agent) {
 export async function deleteAgent(slug) {
   const response = await apiFetch(`/dashboard/agent/${encodeURIComponent(slug)}`, { method: 'DELETE' });
   if (!response.ok) throw new Error('Failed to delete agent');
+  return await response.json();
+}
+
+// --- Tenant Config CRUD ---
+
+export async function getTenants(activeOnly = false, limit = 200) {
+  try {
+    const response = await apiFetch(`/dashboard/tenants?active_only=${activeOnly ? 'true' : 'false'}&limit=${limit}`);
+    if (!response.ok) throw new Error('Failed to fetch tenants');
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching tenants:', error);
+    emitApiError('Unable to load tenants right now.');
+    return [];
+  }
+}
+
+export async function upsertTenant(tenant) {
+  const response = await apiFetch('/dashboard/tenants', {
+    method: 'POST',
+    body: JSON.stringify(tenant),
+  });
+  if (!response.ok) throw new Error('Failed to save tenant');
+  return await response.json();
+}
+
+export async function deleteTenant(tenantId) {
+  const response = await apiFetch(`/dashboard/tenant/${encodeURIComponent(tenantId)}`, { method: 'DELETE' });
+  if (!response.ok) throw new Error('Failed to delete tenant');
   return await response.json();
 }
 

@@ -1,25 +1,35 @@
 import React, { useState, useEffect } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
-import { getAnalyticsVolume, getStats } from '../../api';
+import { getAnalyticsVolume, getStats, getTenants } from '../../api';
 import StatsCard from './StatsCard';
-import { Calendar, RefreshCcw } from 'lucide-react';
+import { Calendar, RefreshCcw, ChevronDown } from 'lucide-react';
 
 const Analytics = () => {
     const [data, setData] = useState([]);
     const [stats, setStats] = useState(null);
     const [loading, setLoading] = useState(true);
     const [timeRange, setTimeRange] = useState(30);
+    const [tenantId, setTenantId] = useState('');
+    const [tenants, setTenants] = useState([]);
 
     useEffect(() => {
         loadData();
-    }, [timeRange]);
+    }, [timeRange, tenantId]);
+
+    useEffect(() => {
+        const loadTenants = async () => {
+            const tenantList = await getTenants(false, 200);
+            setTenants(Array.isArray(tenantList) ? tenantList : []);
+        };
+        loadTenants();
+    }, []);
 
     const loadData = async () => {
         setLoading(true);
         try {
             const [volumeData, statsData] = await Promise.all([
-                getAnalyticsVolume(timeRange),
-                getStats(timeRange)
+                getAnalyticsVolume(timeRange, tenantId || null),
+                getStats(timeRange, tenantId || null)
             ]);
 
             // Transform data to add cost
@@ -56,6 +66,21 @@ const Analytics = () => {
             <div className="flex justify-between items-center">
                 <h1 className="text-2xl font-bold text-white">Analytics Overview</h1>
                 <div className="flex gap-4">
+                    <div className="relative">
+                        <select
+                            value={tenantId}
+                            onChange={(e) => setTenantId(e.target.value)}
+                            className="appearance-none bg-slate-900 border border-slate-800 text-white rounded-lg px-4 py-2 pr-9 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        >
+                            <option value="">All Tenants</option>
+                            {tenants.map((tenant) => (
+                                <option key={tenant.tenant_id} value={tenant.tenant_id}>
+                                    {tenant.display_name || tenant.tenant_id}
+                                </option>
+                            ))}
+                        </select>
+                        <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+                    </div>
                     <select
                         value={timeRange}
                         onChange={(e) => setTimeRange(Number(e.target.value))}

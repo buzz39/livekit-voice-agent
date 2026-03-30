@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, Play, FileText, Calendar, Clock, Phone, User, Building, X } from 'lucide-react';
-import { getRecentCalls } from '../../api';
+import { Search, FileText, Calendar, Clock, Phone, User, Building, X, ChevronDown } from 'lucide-react';
+import { getRecentCalls, getTenants } from '../../api';
 
 // Simple helper to format duration
 const formatDuration = (seconds) => {
@@ -188,16 +188,26 @@ const CallLogs = () => {
     const [loading, setLoading] = useState(true);
     const [selectedCall, setSelectedCall] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
+    const [tenantId, setTenantId] = useState('');
+    const [tenants, setTenants] = useState([]);
 
     useEffect(() => {
         loadCalls();
+    }, [tenantId]);
+
+    useEffect(() => {
+        const loadTenants = async () => {
+            const tenantList = await getTenants(false, 200);
+            setTenants(Array.isArray(tenantList) ? tenantList : []);
+        };
+        loadTenants();
     }, []);
 
     const loadCalls = async () => {
         setLoading(true);
         try {
             // Fetch more calls than the default dashboard limit
-            const data = await getRecentCalls(100);
+            const data = await getRecentCalls(100, tenantId || null);
             setCalls(data || []);
         } catch (error) {
             console.error("Error loading calls:", error);
@@ -231,10 +241,21 @@ const CallLogs = () => {
                             className="bg-slate-900 border border-slate-800 text-white rounded-lg pl-10 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-64"
                         />
                     </div>
-                    {/* <button className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg transition-colors border border-slate-700">
-                        <Filter className="w-4 h-4" />
-                        Filter
-                    </button> */}
+                    <div className="relative">
+                        <select
+                            value={tenantId}
+                            onChange={(e) => setTenantId(e.target.value)}
+                            className="appearance-none bg-slate-900 border border-slate-800 text-white rounded-lg px-4 py-2 pr-9 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        >
+                            <option value="">All Tenants</option>
+                            {tenants.map((tenant) => (
+                                <option key={tenant.tenant_id} value={tenant.tenant_id}>
+                                    {tenant.display_name || tenant.tenant_id}
+                                </option>
+                            ))}
+                        </select>
+                        <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+                    </div>
                 </div>
             </div>
 

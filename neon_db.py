@@ -368,36 +368,64 @@ class NeonDB:
         async with self.pool.acquire() as conn:
             await conn.execute("DELETE FROM objections WHERE id = $1", objection_id)
     
-    async def get_call_stats(self, days: int = 7) -> Dict[str, Any]:
+    async def get_call_stats(self, days: int = 7, tenant_id: Optional[str] = None) -> Dict[str, Any]:
         """Get call statistics for the last N days."""
         async with self.pool.acquire() as conn:
-            stats = await conn.fetchrow("""
-                SELECT
-                    COUNT(*) as total_calls,
-                    COUNT(CASE WHEN interest_level = 'Hot' THEN 1 END) as hot_leads,
-                    COUNT(CASE WHEN interest_level = 'Warm' THEN 1 END) as warm_leads,
-                    COUNT(CASE WHEN email_captured = true THEN 1 END) as emails_captured,
-                    AVG(duration_seconds) as avg_duration
-                FROM calls
-                WHERE created_at > NOW() - make_interval(days := $1)
-            """, days)
+            if tenant_id:
+                stats = await conn.fetchrow("""
+                    SELECT
+                        COUNT(*) as total_calls,
+                        COUNT(CASE WHEN interest_level = 'Hot' THEN 1 END) as hot_leads,
+                        COUNT(CASE WHEN interest_level = 'Warm' THEN 1 END) as warm_leads,
+                        COUNT(CASE WHEN email_captured = true THEN 1 END) as emails_captured,
+                        AVG(duration_seconds) as avg_duration
+                    FROM calls
+                    WHERE created_at > NOW() - make_interval(days := $1)
+                        AND captured_data ->> 'tenant_id' = $2
+                """, days, tenant_id)
+            else:
+                stats = await conn.fetchrow("""
+                    SELECT
+                        COUNT(*) as total_calls,
+                        COUNT(CASE WHEN interest_level = 'Hot' THEN 1 END) as hot_leads,
+                        COUNT(CASE WHEN interest_level = 'Warm' THEN 1 END) as warm_leads,
+                        COUNT(CASE WHEN email_captured = true THEN 1 END) as emails_captured,
+                        AVG(duration_seconds) as avg_duration
+                    FROM calls
+                    WHERE created_at > NOW() - make_interval(days := $1)
+                """, days)
             return dict(stats) if stats else {}
 
-    async def get_daily_call_volume(self, days: int = 30) -> List[Dict[str, Any]]:
+    async def get_daily_call_volume(self, days: int = 30, tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get daily call volume for the last N days."""
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch("""
-                SELECT
-                    to_char(created_at, 'YYYY-MM-DD') as date,
-                    COUNT(*) as count,
-                    AVG(duration_seconds) as avg_duration,
-                    COUNT(CASE WHEN call_status = 'completed' THEN 1 END) as completed,
-                     COUNT(CASE WHEN call_status = 'failed' THEN 1 END) as failed
-                FROM calls
-                WHERE created_at > NOW() - make_interval(days := $1)
-                GROUP BY 1
-                ORDER BY 1 ASC
-            """, days)
+            if tenant_id:
+                rows = await conn.fetch("""
+                    SELECT
+                        to_char(created_at, 'YYYY-MM-DD') as date,
+                        COUNT(*) as count,
+                        AVG(duration_seconds) as avg_duration,
+                        COUNT(CASE WHEN call_status = 'completed' THEN 1 END) as completed,
+                        COUNT(CASE WHEN call_status = 'failed' THEN 1 END) as failed
+                    FROM calls
+                    WHERE created_at > NOW() - make_interval(days := $1)
+                        AND captured_data ->> 'tenant_id' = $2
+                    GROUP BY 1
+                    ORDER BY 1 ASC
+                """, days, tenant_id)
+            else:
+                rows = await conn.fetch("""
+                    SELECT
+                        to_char(created_at, 'YYYY-MM-DD') as date,
+                        COUNT(*) as count,
+                        AVG(duration_seconds) as avg_duration,
+                        COUNT(CASE WHEN call_status = 'completed' THEN 1 END) as completed,
+                        COUNT(CASE WHEN call_status = 'failed' THEN 1 END) as failed
+                    FROM calls
+                    WHERE created_at > NOW() - make_interval(days := $1)
+                    GROUP BY 1
+                    ORDER BY 1 ASC
+                """, days)
             return [dict(row) for row in rows]
 
     async def get_recent_calls(self, limit: int = 10) -> List[Dict[str, Any]]:
@@ -412,6 +440,7 @@ class NeonDB:
                     c.interest_level,
                     c.transcript,
                     c.recording_url,
+                    c.captured_data,
                     con.contact_name,
                     con.phone_number,
                     con.business_name
@@ -441,6 +470,7 @@ class NeonDB:
                     c.interest_level,
                     c.transcript,
                     c.recording_url,
+                    c.captured_data,
                     con.contact_name,
                     con.phone_number,
                     con.business_name
@@ -676,6 +706,140 @@ class NeonDB:
         """Delete a data schema field by ID."""
         async with self.pool.acquire() as conn:
             await conn.execute("DELETE FROM data_schemas WHERE id = $1", field_id)
+
+    # --- Tenant Config CRUD ---
+
+    async def get_all_tenant_configs(self, active_only: bool = False, limit: int = 200) -> List[Dict[str, Any]]:
+        """Fetch tenant configurations for dashboard management."""
+        async with self.pool.acquire() as conn:
+            if active_only:
+                rows = await conn.fetch(
+                    """
+                    SELECT tenant_id, display_name, agent_slug, workflow_policy, routing_policy,
+                           ai_overrides, opening_line, is_active, created_at, updated_at
+                    FROM tenant_configs
+                    WHERE is_active = true
+                    ORDER BY tenant_id
+                    LIMIT $1
+                    """,
+                    limit,
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT tenant_id, display_name, agent_slug, workflow_policy, routing_policy,
+                           ai_overrides, opening_line, is_active, created_at, updated_at
+                    FROM tenant_configs
+                    ORDER BY tenant_id
+                    LIMIT $1
+                    """,
+                    limit,
+                )
+
+            result: List[Dict[str, Any]] = []
+            for row in rows:
+                d = dict(row)
+                for key in ("created_at", "updated_at"):
+                    if d.get(key):
+                        d[key] = d[key].isoformat()
+                result.append(d)
+            return result
+
+    async def get_tenant_config(self, tenant_id: str, include_api_key: bool = False) -> Optional[Dict[str, Any]]:
+        """Fetch a single tenant configuration by tenant_id."""
+        async with self.pool.acquire() as conn:
+            if include_api_key:
+                row = await conn.fetchrow(
+                    """
+                    SELECT tenant_id, display_name, agent_slug, workflow_policy, routing_policy,
+                           ai_overrides, opening_line, api_key, is_active, created_at, updated_at
+                    FROM tenant_configs
+                    WHERE tenant_id = $1
+                    """,
+                    tenant_id,
+                )
+            else:
+                row = await conn.fetchrow(
+                    """
+                    SELECT tenant_id, display_name, agent_slug, workflow_policy, routing_policy,
+                           ai_overrides, opening_line, is_active, created_at, updated_at
+                    FROM tenant_configs
+                    WHERE tenant_id = $1
+                    """,
+                    tenant_id,
+                )
+
+            if not row:
+                return None
+
+            result = dict(row)
+            for key in ("created_at", "updated_at"):
+                if result.get(key):
+                    result[key] = result[key].isoformat()
+            return result
+
+    async def get_tenant_api_key(self, tenant_id: str) -> Optional[str]:
+        """Fetch tenant API key for request authentication checks."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT api_key, is_active FROM tenant_configs WHERE tenant_id = $1",
+                tenant_id,
+            )
+            if not row or not row["is_active"]:
+                return None
+            return row["api_key"]
+
+    async def upsert_tenant_config(
+        self,
+        tenant_id: str,
+        display_name: str = "",
+        agent_slug: str = "",
+        workflow_policy: str = "",
+        routing_policy: Optional[Dict[str, Any]] = None,
+        ai_overrides: Optional[Dict[str, Any]] = None,
+        opening_line: str = "",
+        api_key: Optional[str] = None,
+        is_active: bool = True,
+    ) -> str:
+        """Create or update a tenant configuration. Returns tenant_id."""
+        async with self.pool.acquire() as conn:
+            routing_policy_json = json.dumps(routing_policy or {})
+            ai_overrides_json = json.dumps(ai_overrides or {})
+            await conn.execute(
+                """
+                INSERT INTO tenant_configs (
+                    tenant_id, display_name, agent_slug, workflow_policy, routing_policy,
+                    ai_overrides, opening_line, api_key, is_active
+                )
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+                ON CONFLICT (tenant_id)
+                DO UPDATE SET
+                    display_name = EXCLUDED.display_name,
+                    agent_slug = EXCLUDED.agent_slug,
+                    workflow_policy = EXCLUDED.workflow_policy,
+                    routing_policy = EXCLUDED.routing_policy,
+                    ai_overrides = EXCLUDED.ai_overrides,
+                    opening_line = EXCLUDED.opening_line,
+                    api_key = COALESCE(EXCLUDED.api_key, tenant_configs.api_key),
+                    is_active = EXCLUDED.is_active,
+                    updated_at = NOW()
+                """,
+                tenant_id,
+                display_name,
+                agent_slug,
+                workflow_policy,
+                routing_policy_json,
+                ai_overrides_json,
+                opening_line,
+                api_key,
+                is_active,
+            )
+            return tenant_id
+
+    async def delete_tenant_config(self, tenant_id: str) -> None:
+        """Delete a tenant configuration by tenant_id."""
+        async with self.pool.acquire() as conn:
+            await conn.execute("DELETE FROM tenant_configs WHERE tenant_id = $1", tenant_id)
 
 
 async def get_db() -> NeonDB:

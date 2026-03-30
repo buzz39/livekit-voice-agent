@@ -10,11 +10,12 @@ import PromptLab from './components/dashboard/PromptLab';
 import DatabaseExplorer from './components/dashboard/DatabaseExplorer';
 import AIConfigPanel from './components/dashboard/AIConfigPanel';
 import ObjectionManager from './components/dashboard/ObjectionManager';
+import TenantManager from './components/dashboard/TenantManager';
 import CallLogs from './components/dashboard/CallLogs';
 import Analytics from './components/dashboard/Analytics';
 import Calendar from './components/dashboard/Calendar';
 import LandingPage from './pages/LandingPage';
-import { apiEvents, getStats, getRecentCalls, startOutboundCall } from './api';
+import { apiEvents, getStats, getRecentCalls, getTenants, startOutboundCall } from './api';
 
 // Protected route wrapper
 const ProtectedRoute = ({ children }) => {
@@ -74,6 +75,8 @@ function Dashboard() {
   const [logs, setLogs] = useState([]);
   const [stats, setStats] = useState(null);
   const [recentCalls, setRecentCalls] = useState([]);
+  const [tenants, setTenants] = useState([]);
+  const [selectedTenantId, setSelectedTenantId] = useState('');
   const [riskLevel, setRiskLevel] = useState('low');
   const [bannerMessage, setBannerMessage] = useState('');
 
@@ -95,22 +98,30 @@ function Dashboard() {
   }, []);
 
   useEffect(() => {
+    async function fetchTenants() {
+      const tenantList = await getTenants(false, 200);
+      setTenants(Array.isArray(tenantList) ? tenantList : []);
+    }
+    fetchTenants();
+  }, []);
+
+  useEffect(() => {
     async function fetchData() {
-      const statsData = await getStats();
+      const statsData = await getStats(7, selectedTenantId || null);
       if (statsData) setStats(statsData);
 
-      const callsData = await getRecentCalls();
+      const callsData = await getRecentCalls(10, selectedTenantId || null);
       if (callsData) setRecentCalls(callsData);
     }
     fetchData();
     const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [selectedTenantId]);
 
   useEffect(() => {
     if (callStatus === 'active' || callStatus === 'connecting') {
       const pollCall = async () => {
-        const calls = await getRecentCalls(1);
+        const calls = await getRecentCalls(1, selectedTenantId || null);
         if (calls && calls.length > 0) {
           const latestCall = calls[0];
           if (latestCall.transcript) {
@@ -138,7 +149,7 @@ function Dashboard() {
       const interval = setInterval(pollCall, 2000);
       return () => clearInterval(interval);
     }
-  }, [callStatus]);
+  }, [callStatus, selectedTenantId]);
 
   const handleStartCall = async (number, businessName, agentSlug, fromNumber) => {
     setCallStatus('connecting');
@@ -148,7 +159,7 @@ function Dashboard() {
       timestamp: new Date().toLocaleTimeString([], { hour12: false })
     }]);
     try {
-      await startOutboundCall(number, businessName, agentSlug, fromNumber);
+      await startOutboundCall(number, businessName, agentSlug, fromNumber, selectedTenantId || null);
       setTimeout(() => setCallStatus('active'), 2000);
       setLogs(prev => [...prev, {
         role: 'system',
@@ -172,8 +183,8 @@ function Dashboard() {
       text: 'Call ended.',
       timestamp: new Date().toLocaleTimeString([], { hour12: false })
     }]);
-    getRecentCalls().then(setRecentCalls);
-    getStats().then(setStats);
+    getRecentCalls(10, selectedTenantId || null).then(setRecentCalls);
+    getStats(7, selectedTenantId || null).then(setStats);
   };
 
   const formatDuration = (seconds) => {
@@ -193,6 +204,20 @@ function Dashboard() {
 
       {currentView === 'command-center' && (
         <div className="grid grid-cols-12 gap-6 h-[calc(100vh-6rem)]">
+          <div className="col-span-12 flex justify-end">
+            <select
+              value={selectedTenantId}
+              onChange={(e) => setSelectedTenantId(e.target.value)}
+              className="bg-slate-900 border border-slate-800 text-white rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="">All Tenants</option>
+              {tenants.map((tenant) => (
+                <option key={tenant.tenant_id} value={tenant.tenant_id}>
+                  {tenant.display_name || tenant.tenant_id}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="col-span-12 grid grid-cols-1 md:grid-cols-4 gap-6 h-32 md:h-40">
             <StatsCard title="Total Calls" value={stats ? stats.total_calls : "..."} subtext={stats ? "Last 7 days" : "Loading..."} chartColor="#10b981" />
             <StatsCard title="Avg Duration" value={stats ? formatDuration(stats.avg_duration) : "..."} subtext={stats ? "Last 7 days" : "Loading..."} chartColor="#6366f1" />
@@ -253,6 +278,7 @@ function Dashboard() {
       {currentView === 'analytics' && <Analytics />}
       {currentView === 'calendar' && <Calendar />}
       {currentView === 'database' && <DatabaseExplorer />}
+      {currentView === 'tenants' && <TenantManager />}
       {currentView === 'ai-config' && <AIConfigPanel />}
       {currentView === 'objections' && <ObjectionManager />}
     </DashboardLayout>

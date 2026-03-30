@@ -216,7 +216,7 @@ async def entrypoint(ctx: JobContext):
         tts=tts,
         min_endpointing_delay=0.5,
         max_endpointing_delay=6.0,
-        min_interruption_words=3,
+        min_interruption_words=1,
         preemptive_generation=True,
     )
 

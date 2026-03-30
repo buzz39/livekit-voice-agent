@@ -170,3 +170,81 @@ async def test_transfer_call_uses_default_tel_destination_without_sip_domain():
         assert request.transfer_to == f"sip:+15553334444@{sip_domain}"
     else:
         assert request.transfer_to == "tel:+15553334444"
+
+
+@pytest.mark.asyncio
+async def test_create_appointment_idempotent():
+    call_metadata = {"notes": []}
+    mock_db = AsyncMock()
+    mock_dispatcher = AsyncMock()
+    mock_hangup = AsyncMock()
+
+    tools = create_tools(
+        call_metadata,
+        mock_db,
+        mock_dispatcher,
+        "contact_123",
+        "+15550000000",
+        mock_hangup,
+    )
+
+    create_appointment_tool = next(t for t in tools if t.__name__ == "create_appointment")
+
+    first = await create_appointment_tool(
+        customer_name="Ravi",
+        appointment_time="2026-03-31T10:30:00+05:30",
+        purpose="roof inspection",
+        idempotency_key="apt-1",
+    )
+    second = await create_appointment_tool(
+        customer_name="Ravi",
+        appointment_time="2026-03-31T10:30:00+05:30",
+        purpose="roof inspection",
+        idempotency_key="apt-1",
+    )
+
+    assert first == "Appointment created."
+    assert second == "Appointment request already processed."
+    assert len(call_metadata.get("appointments", [])) == 1
+
+
+@pytest.mark.asyncio
+async def test_capture_lead_and_push_crm_note_audit_events():
+    call_metadata = {"notes": []}
+    mock_db = AsyncMock()
+    mock_dispatcher = AsyncMock()
+    mock_hangup = AsyncMock()
+
+    tools = create_tools(
+        call_metadata,
+        mock_db,
+        mock_dispatcher,
+        "contact_123",
+        "+15550000000",
+        mock_hangup,
+    )
+
+    capture_lead_tool = next(t for t in tools if t.__name__ == "capture_lead")
+    push_crm_note_tool = next(t for t in tools if t.__name__ == "push_crm_note")
+
+    lead_result = await capture_lead_tool(
+        lead_name="Anita Sharma",
+        email="anita@example.com",
+        intent="schedule_quote",
+        budget="150000",
+        idempotency_key="lead-1",
+    )
+    note_result = await push_crm_note_tool(
+        note="Customer requested next-day callback",
+        system="hubspot",
+        idempotency_key="crm-1",
+    )
+
+    assert lead_result == "Lead captured."
+    assert note_result == "CRM note pushed."
+    assert call_metadata["lead"]["lead_name"] == "Anita Sharma"
+    assert len(call_metadata.get("tool_events", [])) >= 2
+
+    dispatched_event_names = [call.args[0] for call in mock_dispatcher.dispatch.await_args_list]
+    assert "lead.captured" in dispatched_event_names
+    assert "crm.note" in dispatched_event_names

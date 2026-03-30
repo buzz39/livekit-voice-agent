@@ -172,4 +172,11 @@ async def finalize_call(
     except Exception:
         pass
 
+    try:
+        state_machine = call_metadata.get("state_machine")
+        if isinstance(state_machine, dict):
+            state_machine["current_state"] = "finalized"
+    except Exception:
+        pass
+
     return True

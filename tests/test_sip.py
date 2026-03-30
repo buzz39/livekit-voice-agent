@@ -1,11 +1,15 @@
-import asyncio
 import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from outbound.sip import dial_participant, get_sip_identity
+from outbound.sip import (
+    _extract_sip_status_code,
+    _parse_trunk_candidates,
+    dial_participant,
+    get_sip_identity,
+)
 
 # Ensure trunk ID is set so dial_participant doesn't early-return
 _SIP_ENV = {"LIVEKIT_OUTBOUND_TRUNK_ID": "trunk-test-123"}
@@ -22,38 +26,90 @@ def _make_ctx():
 
 
 @pytest.mark.asyncio
-async def test_dial_participant_recovers_when_participant_joins_after_exception():
+async def test_dial_participant_stops_on_hard_sip_failure():
     ctx = _make_ctx()
     dispatcher = AsyncMock()
-    participant = SimpleNamespace(identity="15550000000")
-    ctx.api.sip.create_sip_participant.side_effect = RuntimeError("sip status 500")
+
+    class _HardSipError(Exception):
+        def __init__(self):
+            super().__init__("sip hard failure")
+            self.metadata = {"sip_status_code": "486"}
+
+    ctx.api.sip.create_sip_participant.side_effect = _HardSipError()
 
     with patch.dict(os.environ, _SIP_ENV), \
-         patch("outbound.sip.wait_for_participant", new=AsyncMock(return_value=participant)):
-        success = await dial_participant(ctx, "+15550000000", "Test Biz", dispatcher)
-
-    assert success is True
-    dispatcher.dispatch.assert_called_once_with(
-        "call.dial_recovered",
-        {"error": "sip status 500", "participant_identity": "15550000000"},
-    )
-
-
-@pytest.mark.asyncio
-async def test_dial_participant_fails_when_participant_never_joins():
-    ctx = _make_ctx()
-    dispatcher = AsyncMock()
-    ctx.api.sip.create_sip_participant.side_effect = RuntimeError("sip status 500")
-
-    async def _timeout(*args, **kwargs):
-        raise asyncio.TimeoutError()
-
-    with patch.dict(os.environ, _SIP_ENV), \
-         patch("outbound.sip.wait_for_participant", new=AsyncMock(side_effect=_timeout)):
+         patch("outbound.sip.wait_for_participant", new=AsyncMock()):
         success = await dial_participant(ctx, "+15550000000", "Test Biz", dispatcher)
 
     assert success is False
-    dispatcher.dispatch.assert_called_once_with("call.failed", {"error": "sip status 500"})
+    dispatch_calls = [args.args for args in dispatcher.dispatch.await_args_list]
+    assert any(call[0] == "call.failed" for call in dispatch_calls)
+
+
+@pytest.mark.asyncio
+async def test_dial_participant_retries_with_secondary_trunk_on_retryable_failure():
+    ctx = _make_ctx()
+    dispatcher = AsyncMock()
+    participant = SimpleNamespace(identity="15550000000")
+    call_metadata = {}
+
+    class _RetryableSipError(Exception):
+        def __init__(self):
+            super().__init__("sip temporary failure")
+            self.metadata = {"sip_status_code": "500"}
+
+    ctx.api.sip.create_sip_participant.side_effect = [_RetryableSipError(), None]
+
+    env = {
+        **_SIP_ENV,
+        "LIVEKIT_OUTBOUND_TRUNK_IDS": "trunk-test-456",
+        "SIP_DIAL_RETRY_DELAY_SECONDS": "0",
+        "SIP_DIAL_MAX_ROUNDS": "1",
+    }
+
+    with patch.dict(os.environ, env), \
+         patch("outbound.sip.wait_for_participant", new=AsyncMock(return_value=participant)):
+        success = await dial_participant(
+            ctx,
+            "+15550000000",
+            "Test Biz",
+            dispatcher,
+            call_metadata=call_metadata,
+        )
+
+    assert success is True
+    assert ctx.api.sip.create_sip_participant.await_count == 2
+    assert call_metadata["successful_trunk_id"] == "trunk-test-456"
+    assert len(call_metadata["dial_attempts"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_dial_participant_stops_early_on_single_trunk_repeated_failures():
+    ctx = _make_ctx()
+    dispatcher = AsyncMock()
+
+    class _RetryableSipError(Exception):
+        def __init__(self):
+            super().__init__("sip temporary failure")
+            self.metadata = {"sip_status_code": "500"}
+
+    ctx.api.sip.create_sip_participant.side_effect = _RetryableSipError()
+
+    env = {
+        **_SIP_ENV,
+        "SIP_DIAL_RETRY_DELAY_SECONDS": "0",
+        "SIP_DIAL_MAX_ROUNDS": "5",
+        "SIP_TRUNK_FAILURE_THRESHOLD": "2",
+        "SIP_TRUNK_COOLDOWN_SECONDS": "30",
+    }
+
+    with patch.dict(os.environ, env), \
+         patch("outbound.sip.wait_for_participant", new=AsyncMock()):
+        success = await dial_participant(ctx, "+15550000000", "Test Biz", dispatcher)
+
+    assert success is False
+    # Should fail fast after threshold instead of consuming all 5 rounds.
+    assert ctx.api.sip.create_sip_participant.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -67,7 +123,8 @@ async def test_dial_participant_waits_for_join_after_successful_dial():
         success = await dial_participant(ctx, "sip:agent@test.local", "Test Biz", dispatcher)
 
     assert success is True
-    dispatcher.dispatch.assert_not_called()
+    dispatch_events = [args.args[0] for args in dispatcher.dispatch.await_args_list]
+    assert dispatch_events == ["call.dial.attempt"]
     request = ctx.api.sip.create_sip_participant.await_args.args[0]
     assert request.participant_identity == "sip:agent@test.local"
     assert request.sip_call_to == "agent"
@@ -119,3 +176,24 @@ def test_get_sip_identity_returns_raw_sip_uri():
 
 def test_get_sip_identity_digits_only_input():
     assert get_sip_identity("919096132265") == "919096132265"
+
+
+def test_parse_trunk_candidates_deduplicates_and_preserves_order():
+    with patch.dict(
+        os.environ,
+        {
+            "LIVEKIT_OUTBOUND_TRUNK_ID": "primary",
+            "LIVEKIT_OUTBOUND_TRUNK_IDS": "secondary,primary, tertiary ",
+        },
+        clear=False,
+    ):
+        assert _parse_trunk_candidates() == ["primary", "secondary", "tertiary"]
+
+
+def test_extract_sip_status_code_from_metadata():
+    class _Error(Exception):
+        def __init__(self):
+            super().__init__("err")
+            self.metadata = {"sip_status_code": "503"}
+
+    assert _extract_sip_status_code(_Error()) == 503

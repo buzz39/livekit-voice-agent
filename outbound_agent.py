@@ -18,6 +18,7 @@ from livekit.agents.llm import LLMError
 from livekit.plugins import noise_cancellation
 from livekit import api
 from livekit import rtc
+from livekit.agents.llm import ChatMessage
 
 from egress_manager import EgressManager
 from neon_db import get_db
@@ -36,6 +37,8 @@ from outbound.providers import (
     get_missing_provider_env_vars,
     resolve_ai_configuration,
 )
+from outbound.state_machine import CallState, CallStateMachine
+from outbound.tenant_profile import get_tenant_profile
 
 # Whispey Observability Integration
 try:
@@ -66,16 +69,47 @@ async def _run_entrypoint(ctx: JobContext):
 
     # 1. Initialize per-call state
     call_metadata = {"notes": []}
+    state_machine = CallStateMachine()
+    session_start_timeout_seconds = float(os.getenv("OUTBOUND_SESSION_START_TIMEOUT_SECONDS", "20"))
+    opening_playout_timeout_seconds = float(os.getenv("OUTBOUND_OPENING_PLAYOUT_TIMEOUT_SECONDS", "25"))
+    llm_response_timeout_seconds = float(os.getenv("OUTBOUND_LLM_RESPONSE_TIMEOUT_SECONDS", "8"))
+    llm_slow_fallback_message = os.getenv(
+        "OUTBOUND_LLM_SLOW_FALLBACK_MESSAGE",
+        "Thanks for your patience, give me a quick moment while I pull that up.",
+    )
+    output_sample_rate = int(os.getenv("OUTBOUND_OUTPUT_SAMPLE_RATE", "8000"))
+    enable_output_dtx = os.getenv("OUTBOUND_ENABLE_DTX", "false").lower() in {"1", "true", "yes", "on"}
+    enable_output_red = os.getenv("OUTBOUND_ENABLE_RED", "false").lower() in {"1", "true", "yes", "on"}
 
     # Connect to room
     await ctx.connect()
+    state_machine.transition(CallState.ROOM_CONNECTED)
+    call_metadata["state_machine"] = state_machine.export()
     logger.info(f"Connected to room {ctx.room.name}")
 
     # 2. Extract outbound metadata (robust)
     initial_metadata = extract_metadata(ctx)
     phone_number, business_name, agent_slug = get_required_fields(initial_metadata)
+    tenant_id = initial_metadata.get("tenant_id")
+    tenant_profile = await get_tenant_profile(tenant_id)
+
+    if tenant_profile:
+        tenant_agent_slug = tenant_profile.get("agent_slug")
+        if isinstance(tenant_agent_slug, str) and tenant_agent_slug.strip():
+            agent_slug = tenant_agent_slug.strip()
+        ai_overrides = tenant_profile.get("ai_overrides")
+        if isinstance(ai_overrides, dict):
+            # Reuse existing metadata override resolution path in outbound.providers.
+            initial_metadata.update(ai_overrides)
     from_number = initial_metadata.get("from_number")
     call_metadata["business_name"] = business_name
+    if tenant_id:
+        call_metadata["tenant_id"] = tenant_id
+    if tenant_profile:
+        call_metadata["workflow_policy"] = tenant_profile.get("workflow_policy")
+        routing_policy = tenant_profile.get("routing_policy")
+        if isinstance(routing_policy, dict):
+            call_metadata["routing_policy"] = routing_policy
 
     logger.info(f"Parsed metadata → phone: {phone_number}, business: {business_name}, slug: {agent_slug}")
     if from_number:
@@ -86,6 +120,12 @@ async def _run_entrypoint(ctx: JobContext):
         return
 
     logger.info(f"Preparing outbound call to {phone_number} using agent {agent_slug}")
+    logger.info(
+        "Telephony output config: sample_rate=%s, dtx=%s, red=%s",
+        output_sample_rate,
+        enable_output_dtx,
+        enable_output_red,
+    )
 
     # 3. Setup Database & Config
     db = await get_db()
@@ -104,6 +144,8 @@ async def _run_entrypoint(ctx: JobContext):
 
     # Fetch instructions (with schema injection)
     agent_instructions = await prepare_instructions(db, agent_slug, schema_fields, agent_config=agent_config)
+    state_machine.transition(CallState.CONFIG_LOADED)
+    call_metadata["state_machine"] = state_machine.export()
 
     # Create contact
     contact_id = await db.upsert_contact(phone_number, business_name)
@@ -120,6 +162,8 @@ async def _run_entrypoint(ctx: JobContext):
             captured_data=call_metadata
         )
         call_metadata["call_id"] = call_id
+        state_machine.transition(CallState.CALL_LOGGED, details={"call_id": call_id})
+        call_metadata["state_machine"] = state_machine.export()
         logger.info(f"Call initiated in DB with ID: {call_id}")
     except Exception as e:
         logger.error(f"Failed to log initial call record: {e}")
@@ -231,6 +275,15 @@ async def _run_entrypoint(ctx: JobContext):
         ctx=ctx,
     )
 
+    # Inject caller context directly into prompt (avoids Groq null-argument bug with lookup tools)
+    caller_context = (
+        f"\n\nCALLER CONTEXT (already known — do NOT ask for this or call any lookup tool):\n"
+        f"- Phone: {phone_number}\n"
+        f"- Business: {business_name}\n"
+        f"- Contact ID: {contact_id}\n"
+    )
+    agent_instructions += caller_context
+
     agent = Agent(instructions=agent_instructions, tools=all_tools)
 
     try:
@@ -271,8 +324,8 @@ async def _run_entrypoint(ctx: JobContext):
         tts=tts,
         min_endpointing_delay=0.5,
         max_endpointing_delay=6.0,
-        min_interruption_words=3,
-        preemptive_generation=True,
+        min_interruption_words=1,
+        preemptive_generation=os.getenv("OUTBOUND_PREEMPTIVE_GENERATION", "false").lower() in {"1", "true", "yes", "on"},
     )
 
     # --- Agent Observability: collect & log STT/LLM/TTS latency metrics ---
@@ -302,6 +355,58 @@ async def _run_entrypoint(ctx: JobContext):
             except Exception:
                 logger.warning("Failed to speak LLM error fallback message")
 
+    # Guard against long LLM delays after a committed user utterance.
+    pending_turn_watchdog: asyncio.Task | None = None
+    user_turn_counter = 0
+    assistant_turn_counter = 0
+
+    def _cancel_watchdog() -> None:
+        nonlocal pending_turn_watchdog
+        if pending_turn_watchdog and not pending_turn_watchdog.done():
+            pending_turn_watchdog.cancel()
+        pending_turn_watchdog = None
+
+    async def _turn_watchdog(turn_number: int) -> None:
+        try:
+            await asyncio.sleep(llm_response_timeout_seconds)
+            if assistant_turn_counter < turn_number:
+                note = (
+                    f"LLM response timeout ({llm_response_timeout_seconds}s) after user turn #{turn_number}; "
+                    "speaking fallback"
+                )
+                call_metadata["notes"].append(note)
+                state_machine.transition(
+                    CallState.LLM_TIMEOUT_FALLBACK,
+                    reason="assistant_turn_timeout",
+                    details={"turn_number": turn_number, "timeout_seconds": llm_response_timeout_seconds},
+                )
+                call_metadata["state_machine"] = state_machine.export()
+                logger.warning(note)
+                handle = session.say(llm_slow_fallback_message, allow_interruptions=True)
+                await handle
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logger.warning("LLM watchdog fallback failed: %s", e)
+
+    @session.on("user_input_transcribed")
+    def _on_user_input_transcribed(ev):
+        nonlocal user_turn_counter, pending_turn_watchdog
+        transcript = (getattr(ev, "transcript", "") or "").strip()
+        if not getattr(ev, "is_final", False) or not transcript:
+            return
+        user_turn_counter += 1
+        _cancel_watchdog()
+        pending_turn_watchdog = asyncio.create_task(_turn_watchdog(user_turn_counter))
+
+    @session.on("conversation_item_added")
+    def _on_conversation_item_added(ev):
+        nonlocal assistant_turn_counter
+        item = getattr(ev, "item", None)
+        if isinstance(item, ChatMessage) and getattr(item, "role", None) == "assistant":
+            assistant_turn_counter += 1
+            _cancel_watchdog()
+
     # Start Whispey session tracking with metadata
     session_id = None
     if whispey:
@@ -318,6 +423,8 @@ async def _run_entrypoint(ctx: JobContext):
 
     # 5. Start Session ASYNCHRONOUSLY (Critical for latency)
     logger.info("Starting LiveKit agent session")
+    state_machine.transition(CallState.SESSION_STARTING)
+    call_metadata["state_machine"] = state_machine.export()
 
     async def start_agent_session():
         try:
@@ -329,10 +436,10 @@ async def _run_entrypoint(ctx: JobContext):
                     close_on_disconnect=False,
                 ),
                 room_output_options=RoomOutputOptions(
-                    audio_sample_rate=48000,
+                    audio_sample_rate=output_sample_rate,
                     audio_publish_options=rtc.TrackPublishOptions(
-                        dtx=True,
-                        red=True,
+                        dtx=enable_output_dtx,
+                        red=enable_output_red,
                         source=rtc.TrackSource.SOURCE_MICROPHONE,
                     ),
                 ),
@@ -363,8 +470,19 @@ async def _run_entrypoint(ctx: JobContext):
 
     # 6. Dial the user (SIP)
     # This function handles the dialing and basic error reporting
-    dial_success = await dial_participant(ctx, phone_number, business_name, dispatcher, from_number=from_number)
+    state_machine.transition(CallState.DIALING, details={"phone_number": phone_number})
+    call_metadata["state_machine"] = state_machine.export()
+    dial_success = await dial_participant(
+        ctx,
+        phone_number,
+        business_name,
+        dispatcher,
+        from_number=from_number,
+        call_metadata=call_metadata,
+    )
     if not dial_success:
+        state_machine.transition(CallState.DIAL_FAILED, reason="sip_dial_failed")
+        call_metadata["state_machine"] = state_machine.export()
         logger.warning("SIP dial failed for %s — marking call %s as failed", phone_number, call_metadata.get("call_id"))
         call_id = call_metadata.get("call_id")
         if call_id and db:
@@ -385,13 +503,21 @@ async def _run_entrypoint(ctx: JobContext):
             pass
         return
 
+    state_machine.transition(CallState.DIALED)
+    call_metadata["state_machine"] = state_machine.export()
+
     # ===================== RECORDING =====================
     # Start recording only after the call is answered
     await start_recording(ctx, egress_manager, call_metadata, dispatcher, contact_id, phone_number)
+    state_machine.transition(CallState.RECORDING_STARTED)
+    call_metadata["state_machine"] = state_machine.export()
     # =====================================================
 
     # 8. Fire Opener using session.say()
     opening_line = agent_config.get("opening_line") or "Hello? Am I speaking with the business owner?"
+    tenant_opening_line = tenant_profile.get("opening_line") if tenant_profile else None
+    if isinstance(tenant_opening_line, str) and tenant_opening_line.strip():
+        opening_line = tenant_opening_line
 
     if business_name:
         if "{business_name}" in opening_line:
@@ -404,8 +530,15 @@ async def _run_entrypoint(ctx: JobContext):
     # Ensure session is started before speaking
     logger.info("Waiting for LiveKit agent session to finish startup before sending opening line")
     try:
-        await session_start_task
+        await asyncio.wait_for(session_start_task, timeout=session_start_timeout_seconds)
+        state_machine.transition(CallState.SESSION_READY)
+        call_metadata["state_machine"] = state_machine.export()
     except Exception:
+        state_machine.transition(CallState.FAILED, reason="session_start_timeout_or_error")
+        call_metadata["state_machine"] = state_machine.export()
+        call_metadata["notes"].append(
+            f"Session start failed or timed out after {session_start_timeout_seconds}s"
+        )
         try:
             await hangup_call()
         except Exception as hangup_error:
@@ -414,9 +547,27 @@ async def _run_entrypoint(ctx: JobContext):
     logger.info("LiveKit agent session is ready; sending opening line")
     
     try:
-        await session.say(opening_line, allow_interruptions=False)
+        state_machine.transition(CallState.OPENING_PLAYING)
+        call_metadata["state_machine"] = state_machine.export()
+        handle = session.say(opening_line, allow_interruptions=False)
+        logger.info("Opening line queued: handle=%s", handle.id)
+        await asyncio.wait_for(handle, timeout=opening_playout_timeout_seconds)
+        state_machine.transition(CallState.OPENING_PLAYED)
+        call_metadata["state_machine"] = state_machine.export()
+        logger.info("Opening line playout completed")
+        state_machine.transition(CallState.IN_CONVERSATION)
+        call_metadata["state_machine"] = state_machine.export()
+    except asyncio.TimeoutError:
+        state_machine.transition(CallState.OPENING_FAILED, reason="opening_playout_timeout")
+        call_metadata["state_machine"] = state_machine.export()
+        call_metadata["notes"].append(
+            f"Opening line playout timed out after {opening_playout_timeout_seconds}s"
+        )
+        logger.warning("Opening line playout timed out; continuing call flow")
     except Exception as e:
-        logger.warning(f"Failed to play opening line: {e}")
+        state_machine.transition(CallState.OPENING_FAILED, reason="opening_playout_error")
+        call_metadata["state_machine"] = state_machine.export()
+        logger.warning(f"Failed to play opening line: {e}", exc_info=True)
 
     # 9. Handle Disconnect & Cleanup Robustly
 
@@ -436,6 +587,9 @@ async def _run_entrypoint(ctx: JobContext):
             return
 
         is_finalized = True
+        _cancel_watchdog()
+        state_machine.transition(CallState.FINALIZING)
+        call_metadata["state_machine"] = state_machine.export()
 
         # Log usage summary before finalizing
         try:
@@ -463,6 +617,8 @@ async def _run_entrypoint(ctx: JobContext):
             prompt_id=prompt_id,
             is_finalized=False # We already checked above, but passing False lets it run.
         )
+        state_machine.transition(CallState.FINALIZED)
+        call_metadata["state_machine"] = state_machine.export()
 
     # Register Whispey shutdown callback
     if whispey and session_id:
@@ -493,6 +649,11 @@ async def _run_entrypoint(ctx: JobContext):
                 expected_sip_identity,
             )
             return
+        state_machine.transition(
+            CallState.PARTICIPANT_DISCONNECTED,
+            details={"participant_identity": participant.identity},
+        )
+        call_metadata["state_machine"] = state_machine.export()
         logger.info(f"Participant {participant.identity} disconnected - triggering finalize")
         asyncio.create_task(finalize_call())
 
@@ -543,11 +704,11 @@ if __name__ == "__main__":
     # ======================================================================
 
     # Set default load threshold to 0.9 to avoid flapping in dev/high-load envs
-    # Note: Ensure this is a valid float string.
-    # os.environ.setdefault("LIVEKIT_WORKER_LOAD_THRESHOLD", "0.9")
+    os.environ.setdefault("LIVEKIT_WORKER_LOAD_THRESHOLD", "0.9")
+    _agent_name = os.getenv("OUTBOUND_AGENT_NAME", "voice-assistant")
     cli.run_app(
         WorkerOptions(
             entrypoint_fnc=entrypoint,
-            agent_name="voice-assistant",
+            agent_name=_agent_name,
         )
     )
